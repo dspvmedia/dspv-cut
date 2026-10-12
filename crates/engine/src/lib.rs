@@ -422,6 +422,9 @@ pub struct Session {
     pub offline: relink::OfflineState,
     /// Proxy / ingest / project-manager jobs whose results still have to be applied to the project.
     pub media_jobs: Vec<proxies::PendingJob>,
+    /// What import did beyond importing (a proxy attached by an import rule, one that was refused and why): filled by an
+    /// import and emptied into `file.import`'s result.
+    pub import_notes: Vec<serde_json::Value>,
     /// Mask tracking jobs whose keyframes are still being written.
     pub mask_jobs: Vec<masks::PendingTrack>,
     /// Scene Edit Detection jobs whose results are applied when they finish.
@@ -528,6 +531,7 @@ impl Session {
             shortcuts: shortcuts::Shortcuts::new(),
             offline: Default::default(),
             media_jobs: Vec::new(),
+            import_notes: Vec::new(),
             mask_jobs: Vec::new(),
             scene_jobs: Vec::new(),
             presets: Default::default(),

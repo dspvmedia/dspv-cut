@@ -658,6 +658,15 @@ fn import_source(
         color_space: crate::interpret_rules::resolve(&s.prefs.import_rules.rules, path, &*s.services),
         ..Default::default()
     };
+    // ... and the proxy the rules name for it: found by name, checked against this clip, attached with the import (a pair that does not
+    // fit is reported and left out, never attached)
+    let mut proxy: Option<MediaRef> = None;
+    if let Some(found) = crate::interpret_rules::find_proxy(&s.prefs.import_rules.rules, path, &*s.services) {
+        match crate::proxies::check_found_proxy(s, &info, &name, &found) {
+            Ok(()) => proxy = Some(MediaRef::File { path: found }),
+            Err(why) => s.import_notes.push(json!({"warning": format!("{name}: the proxy {found} was not attached: {why}")})),
+        }
+    }
     let id = s.edit(&format!("Import {name}"), |p, _| {
         Ok(p.add_item(
             &name,
@@ -670,12 +679,15 @@ fn import_source(
                 mark_out: None,
                 markers: vec![],
                 offline: false,
-                proxy: None,
+                proxy: proxy.clone(),
                 identity: Some(identity),
             }),
             bin,
         ))
     })?;
+    if let Some(MediaRef::File { path: pp }) = &proxy {
+        s.import_notes.push(json!({"item": id.0, "proxy": pp}));
+    }
     s.media.insert_file(id, path, src);
     Ok(id)
 }
@@ -1304,6 +1316,7 @@ fn build() -> Vec<CommandSpec> {
             let mut sequences = Vec::new();
             let mut reports = Vec::new();
             let mut image_sequences = Vec::new();
+            s.import_notes.clear();
             // Image Sequence: each path is the first frame of a numbered still sequence. With
             // Settings ▸ Media ▸ Import image sequences on, a single numbered still is detected.
             let as_sequence = p.get("imageSequence").and_then(Value::as_bool).unwrap_or(false);
@@ -1388,6 +1401,19 @@ fn build() -> Vec<CommandSpec> {
             };
             if !image_sequences.is_empty() {
                 out["imageSequences"] = json!(image_sequences);
+            }
+            // proxies attached by import rules, and the pairs that were refused
+            let notes = std::mem::take(&mut s.import_notes);
+            let proxies: Vec<Value> = notes.iter().filter(|n| n.get("proxy").is_some()).cloned().collect();
+            let warnings: Vec<String> = notes.iter().filter_map(|n| n.get("warning").and_then(Value::as_str).map(str::to_string)).collect();
+            if !proxies.is_empty() {
+                out["proxies"] = json!(proxies);
+            }
+            for w in &warnings {
+                s.error_toast("import", w.clone());
+            }
+            if !warnings.is_empty() {
+                out["warnings"] = json!(warnings);
             }
             // Newly imported files may resolve paths the project already listed as offline
             // (issue #110): rebuild s.offline.missing so the "Media missing" badge clears, and drop

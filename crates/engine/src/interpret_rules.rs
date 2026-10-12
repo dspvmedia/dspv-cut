@@ -12,6 +12,10 @@
 //! `clip.interpretFootage` would, in the same undo step as the import. A clip the user already
 //! interpreted is never overwritten by `project.applyInterpretRules` unless asked.
 //!
+//! A rule can also name the clip's proxy (`proxy`: a same-named file with some extension, in the clip's folder or in listed
+//! folders). On import it is found, checked against the clip (frame rate, length, start timecode, aspect ratio) and attached with
+//! the import; with "Enable proxies" on the editor then plays the proxy, and export always reads the full-resolution clip.
+//!
 //! Commands: `import.rules` (read), `import.setRules` (replace, from `rules` or a JSON `path`),
 //! `project.applyInterpretRules` (apply to clips already in the project, one undo step).
 
@@ -42,6 +46,16 @@ pub struct Companion {
     pub dirs: Vec<String>,
 }
 
+/// Where a clip's proxy is: a file with the same name and this extension, in the clip's own folder (`""`) or in one of `dirs`
+/// (relative to the clip's folder, or absolute). Found at import and attached as the clip's proxy after the pair has been
+/// checked (same frame rate, length, start timecode and aspect ratio): the editor then plays the proxy and exports the clip.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ProxyLink {
+    pub extension: String,
+    pub dirs: Vec<String>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct InterpretRule {
@@ -50,6 +64,8 @@ pub struct InterpretRule {
     pub extensions: Vec<String>,
     /// Match by a companion file.
     pub companion: Option<Companion>,
+    /// Attach the proxy found here to a clip this rule matches.
+    pub proxy: Option<ProxyLink>,
     /// A colour space id (`color.spaces`), e.g. `nlog-bt2020`.
     pub color_space: String,
 }
@@ -92,16 +108,41 @@ fn resolve_dir(media_dir: &str, dir: &str) -> String {
     }
 }
 
-/// Whether `names` holds a file called `<stem>.<ext>` (any case). Hidden files and macOS
-/// AppleDouble copies (`._name`) are not companions.
-fn has_companion(names: &[String], stem: &str, ext: &str) -> bool {
-    names.iter().take(MAX_LISTED).any(|n| {
+/// The file called `<stem>.<ext>` (any case) in `names`, if any. Hidden files and macOS AppleDouble copies (`._name`) do not count.
+fn find_named<'a>(names: &'a [String], stem: &str, ext: &str) -> Option<&'a String> {
+    names.iter().take(MAX_LISTED).find(|n| {
         if n.starts_with('.') {
             return false;
         }
         let (s, e) = split_name(n);
         s.eq_ignore_ascii_case(stem) && e.eq_ignore_ascii_case(ext)
     })
+}
+
+/// Whether `rule` matches a clip called `<stem>.<ext>` in `media_dir`: by its own extension, or by a companion file.
+fn rule_matches(rule: &InterpretRule, ext: &str, stem: &str, media_dir: &str, list: &dyn Fn(&str) -> Option<Vec<String>>) -> bool {
+    if !ext.is_empty() && rule.extensions.iter().any(|e| e.trim_start_matches('.').eq_ignore_ascii_case(ext)) {
+        return true;
+    }
+    let Some(c) = &rule.companion else { return false };
+    if c.extension.is_empty() {
+        return false;
+    }
+    let companion_ext = c.extension.trim_start_matches('.');
+    // a clip is never its own companion (rule extension == companion extension)
+    let own = ext.eq_ignore_ascii_case(companion_ext);
+    let default_dirs = [String::new()];
+    let dirs: &[String] = if c.dirs.is_empty() { &default_dirs } else { &c.dirs };
+    for d in dirs.iter().take(MAX_COMPANION_DIRS) {
+        let dir = resolve_dir(media_dir, d);
+        if let Some(names) = list(&dir)
+            && find_named(&names, stem, companion_ext).is_some()
+            && !(own && dir == media_dir)
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// The colour space the first matching rule gives the file at `path`. `list` returns the file
@@ -113,26 +154,52 @@ pub fn color_space_for(rules: &[InterpretRule], path: &str, list: &dyn Fn(&str) 
     if stem.is_empty() {
         return None;
     }
-    for rule in rules.iter().take(MAX_RULES) {
-        let Some(cs) = ColorSpace::parse(&rule.color_space) else { continue };
-        if !ext.is_empty() && rule.extensions.iter().any(|e| e.trim_start_matches('.').eq_ignore_ascii_case(ext)) {
-            return Some(cs);
+    rules.iter().take(MAX_RULES).find_map(|rule| {
+        let cs = ColorSpace::parse(&rule.color_space)?;
+        rule_matches(rule, ext, stem, media_dir, list).then_some(cs)
+    })
+}
+
+/// `a/b/../c` as `a/c`, for a path written with `/` only (anything with another separator is left alone).
+fn tidy_path(p: &str) -> String {
+    if p.contains('\\') {
+        return p.to_string();
+    }
+    let mut out: Vec<&str> = Vec::new();
+    for part in p.split('/') {
+        match part {
+            "." => {}
+            ".." if out.last().is_some_and(|l| !l.is_empty() && *l != "..") => {
+                out.pop();
+            }
+            other => out.push(other),
         }
-        let Some(c) = &rule.companion else { continue };
-        if c.extension.is_empty() {
+    }
+    out.join("/")
+}
+
+/// The proxy file of the clip at `path` from the first matching rule that has a [`ProxyLink`] and finds its file. The result is a
+/// path; whether the proxy fits the clip is for the caller to check.
+pub fn proxy_for(rules: &[InterpretRule], path: &str, list: &dyn Fn(&str) -> Option<Vec<String>>) -> Option<String> {
+    let (media_dir, file) = split_path(path);
+    let (stem, ext) = split_name(file);
+    if stem.is_empty() {
+        return None;
+    }
+    for rule in rules.iter().take(MAX_RULES) {
+        let Some(link) = &rule.proxy else { continue };
+        let link_ext = link.extension.trim_start_matches('.');
+        if link_ext.is_empty() || !rule_matches(rule, ext, stem, media_dir, list) {
             continue;
         }
-        // a clip is never its own companion (rule extension == companion extension)
-        let own = ext.eq_ignore_ascii_case(c.extension.trim_start_matches('.'));
         let default_dirs = [String::new()];
-        let dirs: &[String] = if c.dirs.is_empty() { &default_dirs } else { &c.dirs };
+        let dirs: &[String] = if link.dirs.is_empty() { &default_dirs } else { &link.dirs };
         for d in dirs.iter().take(MAX_COMPANION_DIRS) {
             let dir = resolve_dir(media_dir, d);
-            if let Some(names) = list(&dir)
-                && has_companion(&names, stem, c.extension.trim_start_matches('.'))
-                && !(own && dir == media_dir)
-            {
-                return Some(cs);
+            let Some(names) = list(&dir) else { continue };
+            // never the clip itself (a proxy with the clip's own extension in the clip's own folder)
+            if let Some(name) = find_named(&names, stem, link_ext).filter(|n| !(tidy_path(&dir) == tidy_path(media_dir) && n.eq_ignore_ascii_case(file))) {
+                return Some(tidy_path(&if dir.is_empty() { name.clone() } else { format!("{dir}/{name}") }));
             }
         }
     }
@@ -145,6 +212,14 @@ pub fn resolve(rules: &[InterpretRule], path: &str, services: &dyn Services) -> 
         return None;
     }
     color_space_for(rules, path, &|dir| services.list_dir(dir.trim_end_matches(['/', '\\'])).and_then(|r| r.ok()))
+}
+
+/// [`proxy_for`] with the host's directory listing.
+pub fn find_proxy(rules: &[InterpretRule], path: &str, services: &dyn Services) -> Option<String> {
+    if rules.is_empty() {
+        return None;
+    }
+    proxy_for(rules, path, &|dir| services.list_dir(dir.trim_end_matches(['/', '\\'])).and_then(|r| r.ok()))
 }
 
 /// Check rules from a user or a file and put them in canonical form (lower-case extensions
@@ -169,6 +244,15 @@ pub fn validate(mut rules: Vec<InterpretRule>) -> std::result::Result<Vec<Interp
             }
             if c.dirs.len() > MAX_COMPANION_DIRS {
                 return Err(at(&format!("at most {MAX_COMPANION_DIRS} companion folders")));
+            }
+        }
+        if let Some(l) = r.proxy.as_mut() {
+            l.extension = l.extension.trim().trim_start_matches('.').to_ascii_lowercase();
+            if l.extension.is_empty() {
+                return Err(at("a proxy needs an extension"));
+            }
+            if l.dirs.len() > MAX_COMPANION_DIRS {
+                return Err(at(&format!("at most {MAX_COMPANION_DIRS} proxy folders")));
             }
         }
         if r.extensions.is_empty() && r.companion.is_none() {
@@ -230,13 +314,16 @@ fn set_rules(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"rules": s.prefs.import_rules.rules.len()}))
 }
 
-/// `project.applyInterpretRules`: give the clips already in the project the colour space their
-/// import rule says. A clip with its own colour space override is left alone unless `overwrite`.
+/// `project.applyInterpretRules`: give the clips already in the project the colour space their import rule says, and attach the
+/// proxy it names to a clip that has none (checked the same way as at import; a pair that does not fit is reported, not
+/// attached). A clip with its own colour space override is left alone unless `overwrite`; a clip that already has a proxy keeps it.
 fn apply_rules(s: &mut Session, p: &Value) -> Result<Value> {
     let overwrite = p.get("overwrite").and_then(Value::as_bool).unwrap_or(false);
     let wanted: Option<Vec<ItemId>> = p.get("items").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).map(ItemId).collect());
     let rules = s.prefs.import_rules.rules.clone();
     let mut changes: Vec<(ItemId, ColorSpace)> = Vec::new();
+    let mut proxies: Vec<(ItemId, String)> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
     let (mut matched, mut kept) = (0usize, 0usize);
     for (id, item) in s.project.items.iter() {
         if wanted.as_ref().is_some_and(|w| !w.contains(id)) {
@@ -244,6 +331,14 @@ fn apply_rules(s: &mut Session, p: &Value) -> Result<Value> {
         }
         let ItemKind::Media(m) = &item.kind else { continue };
         let MediaRef::File { path } = &m.media else { continue };
+        if m.proxy.is_none()
+            && let Some(found) = find_proxy(&rules, path, &*s.services)
+        {
+            match crate::proxies::check_found_proxy(s, &m.info, &item.name, &found) {
+                Ok(()) => proxies.push((*id, found)),
+                Err(why) => warnings.push(format!("{}: the proxy {found} was not attached: {why}", item.name)),
+            }
+        }
         let Some(cs) = resolve(&rules, path, &*s.services) else { continue };
         matched += 1;
         if m.interpret.color_space == Some(cs) {
@@ -255,18 +350,28 @@ fn apply_rules(s: &mut Session, p: &Value) -> Result<Value> {
         }
         changes.push((*id, cs));
     }
-    if !changes.is_empty() {
+    if !changes.is_empty() || !proxies.is_empty() {
         s.edit("Apply Import Rules", |pr, _| {
             for (id, cs) in &changes {
                 if let Some(ItemKind::Media(m)) = pr.item_mut(*id).map(|it| &mut it.kind) {
                     m.interpret.color_space = Some(*cs);
                 }
             }
+            for (id, path) in &proxies {
+                if let Some(ItemKind::Media(m)) = pr.item_mut(*id).map(|it| &mut it.kind) {
+                    m.proxy = Some(MediaRef::File { path: path.clone() });
+                }
+            }
             Ok(())
         })?;
     }
+    for w in &warnings {
+        s.error_toast("import rules", w.clone());
+    }
     Ok(json!({
         "changed": changes.iter().map(|(i, c)| json!({"item": i.0, "colorSpace": c.id()})).collect::<Vec<_>>(),
+        "proxiesAttached": proxies.iter().map(|(i, p)| json!({"item": i.0, "proxy": p})).collect::<Vec<_>>(),
+        "warnings": warnings,
         "matched": matched,
         "keptExistingOverride": kept,
     }))
@@ -356,6 +461,98 @@ mod tests {
         }])
         .unwrap();
         assert_eq!(color_space_for(&own, "/a/x.mp4", &disk(&[("/a", &["x.mp4"])])), None);
+    }
+
+    fn proxy_rules() -> Vec<InterpretRule> {
+        validate(vec![InterpretRule {
+            name: "N-RAW".into(),
+            extensions: vec!["NEV".into()],
+            proxy: Some(ProxyLink { extension: ".MP4".into(), dirs: vec!["".into(), "Proxy".into(), "../Proxy".into()] }),
+            color_space: "nlog-bt2020".into(),
+            ..Default::default()
+        }])
+        .unwrap()
+    }
+
+    #[test]
+    fn the_proxy_is_found_by_name_in_the_listed_folders() {
+        let r = proxy_rules();
+        // the job layout: the clip in Nikon/, its proxy in Nikon/Proxy/
+        let job = disk(&[("/job/Nikon", &["DSC_0275.NEV", "DSC_0276.NEV"]), ("/job/Nikon/Proxy", &["DSC_0275.MP4", "dsc_0276.mp4", "._DSC_0275.MP4"])]);
+        assert_eq!(proxy_for(&r, "/job/Nikon/DSC_0275.NEV", &job).as_deref(), Some("/job/Nikon/Proxy/DSC_0275.MP4"));
+        assert_eq!(
+            proxy_for(&r, "/job/Nikon/DSC_0276.NEV", &job).as_deref(),
+            Some("/job/Nikon/Proxy/dsc_0276.mp4"),
+            "any case, and the real file name is kept"
+        );
+        // the card layout: both in one folder
+        let card = disk(&[("/card/DCIM", &["DSC_0275.NEV", "DSC_0275.MP4"])]);
+        assert_eq!(proxy_for(&r, "/card/DCIM/DSC_0275.NEV", &card).as_deref(), Some("/card/DCIM/DSC_0275.MP4"));
+        // a proxy folder beside the clip's folder: `..` is resolved in the result
+        let sibling = disk(&[("/job/Raw", &["DSC_0275.NEV"]), ("/job/Raw/../Proxy", &["DSC_0275.MP4"])]);
+        assert_eq!(proxy_for(&r, "/job/Raw/DSC_0275.NEV", &sibling).as_deref(), Some("/job/Proxy/DSC_0275.MP4"));
+    }
+
+    #[test]
+    fn no_proxy_is_found_when_there_is_none_or_it_is_not_for_this_clip() {
+        let r = proxy_rules();
+        let job = disk(&[("/job/Nikon", &["DSC_0275.NEV"]), ("/job/Nikon/Proxy", &["DSC_0999.MP4", "._DSC_0275.MP4", "DSC_0275.MOV"])]);
+        assert_eq!(proxy_for(&r, "/job/Nikon/DSC_0275.NEV", &job), None);
+        assert_eq!(proxy_for(&r, "/job/Nikon/DSC_0275.NEV", &disk(&[])), None, "folders that cannot be listed find nothing");
+        // a clip no rule matches has no proxy, whatever is beside it
+        let other = disk(&[("/job", &["a.mov"]), ("/job/Proxy", &["a.mp4"])]);
+        assert_eq!(proxy_for(&r, "/job/a.mov", &other), None);
+        // a rule without a proxy link never gives one
+        let plain = validate(vec![InterpretRule { extensions: vec!["nev".into()], color_space: "nlog-bt2020".into(), ..Default::default() }]).unwrap();
+        let job = disk(&[("/job/Nikon", &["DSC_0275.NEV"]), ("/job/Nikon/Proxy", &["DSC_0275.MP4"])]);
+        assert_eq!(proxy_for(&plain, "/job/Nikon/DSC_0275.NEV", &job), None);
+    }
+
+    #[test]
+    fn a_clip_is_never_its_own_proxy() {
+        let same = validate(vec![InterpretRule {
+            extensions: vec!["mp4".into()],
+            proxy: Some(ProxyLink { extension: "mp4".into(), dirs: vec!["".into()] }),
+            color_space: "rec709".into(),
+            ..Default::default()
+        }])
+        .unwrap();
+        assert_eq!(proxy_for(&same, "/a/x.mp4", &disk(&[("/a", &["x.mp4"])])), None);
+        assert_eq!(proxy_for(&same, "/a/x.mp4", &disk(&[("/a", &["x.mp4"]), ("/a", &["x.mp4"])])), None);
+    }
+
+    #[test]
+    fn odd_paths_never_panic_when_looking_for_a_proxy() {
+        let r = proxy_rules();
+        let d = disk(&[]);
+        for p in ["", ".", "..", "/", "\\", ".NEV", "a.", "/.nev", "x/.NEV", "é/ü.nev", "C:", "C:\\", "a/b/../../../c.nev"] {
+            let _ = proxy_for(&r, p, &d);
+        }
+    }
+
+    #[test]
+    fn tidy_path_resolves_dot_segments_only_for_slash_paths() {
+        assert_eq!(tidy_path("/a/b/../c"), "/a/c");
+        assert_eq!(tidy_path("/a/./b"), "/a/b");
+        assert_eq!(tidy_path("/a/b/../../c"), "/c");
+        assert_eq!(tidy_path("a/../../b"), "../b", "a leading .. stays");
+        assert_eq!(tidy_path("C:\\a\\..\\b"), "C:\\a\\..\\b", "a backslash path is left alone");
+        assert_eq!(tidy_path(""), "");
+    }
+
+    #[test]
+    fn validation_normalises_a_proxy_link_and_rejects_a_bad_one() {
+        let ok = proxy_rules();
+        assert_eq!(ok[0].proxy.as_ref().unwrap().extension, "mp4");
+        let none = InterpretRule { extensions: vec!["nev".into()], proxy: Some(ProxyLink::default()), color_space: "rec709".into(), ..Default::default() };
+        assert!(validate(vec![none]).unwrap_err().contains("proxy needs an extension"));
+        let many = InterpretRule {
+            extensions: vec!["nev".into()],
+            proxy: Some(ProxyLink { extension: "mp4".into(), dirs: vec![String::new(); MAX_COMPANION_DIRS + 1] }),
+            color_space: "rec709".into(),
+            ..Default::default()
+        };
+        assert!(validate(vec![many]).is_err());
     }
 
     #[test]

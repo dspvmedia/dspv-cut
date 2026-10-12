@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use filmcraft_color::ColorSpace;
 use filmcraft_project::ItemId;
@@ -16,7 +17,12 @@ fn tmp_dir(name: &str) -> PathBuf {
 
 /// A 0.1 s mono 8 kHz WAV: the smallest media file the engine imports without a codec.
 fn write_wav(path: &Path) {
-    let data = vec![128u8; 800];
+    write_wav_samples(path, 800);
+}
+
+/// A mono 8 kHz WAV of `n` samples (n / 8000 seconds).
+fn write_wav_samples(path: &Path, n: usize) {
+    let data = vec![128u8; n];
     let mut b = Vec::new();
     b.extend_from_slice(b"RIFF");
     b.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
@@ -159,4 +165,114 @@ fn preferences_files_from_before_import_rules_still_load() {
     p.import_rules.rules = serde_json::from_value(nlog_rules()).unwrap();
     let back: Preferences = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
     assert_eq!(back.import_rules, p.import_rules);
+}
+
+fn proxy_rules() -> Value {
+    json!([{"name": "wav with a proxy", "extensions": ["wav"], "proxy": {"extension": "wav", "dirs": ["Proxy"]}, "colorSpace": "rec709"}])
+}
+
+fn proxy_of(s: &Session, id: ItemId) -> Option<String> {
+    match &s.project.item(id).unwrap().as_media().unwrap().proxy {
+        Some(filmcraft_project::MediaRef::File { path }) => Some(path.clone()),
+        _ => None,
+    }
+}
+
+/// A clip and its proxy in the job layout (the clip in a folder, the proxy of the same name in `Proxy` below it).
+fn job(name: &str) -> PathBuf {
+    let d = tmp_dir(name);
+    std::fs::create_dir_all(d.join("Proxy")).unwrap();
+    write_wav(&d.join("a.wav"));
+    write_wav(&d.join("Proxy/a.wav"));
+    // b: a clip whose proxy is twice as long, so the pair cannot be right
+    write_wav_samples(&d.join("b.wav"), 800);
+    write_wav_samples(&d.join("Proxy/b.wav"), 1600);
+    d
+}
+
+#[test]
+fn an_import_rule_attaches_the_proxy_it_names_in_the_import_undo_step() {
+    let d = job("proxy-attach");
+    let mut s = Session::default();
+    s.execute("import.setRules", json!({"rules": proxy_rules()})).unwrap();
+    let before = s.history.undo.len();
+    let r = s.execute("file.import", json!({"paths": [d.join("a.wav").to_string_lossy()]})).unwrap();
+    let id = ItemId(r["items"][0].as_u64().unwrap());
+    let proxy = proxy_of(&s, id).expect("the proxy is attached");
+    assert!(proxy.ends_with("/Proxy/a.wav"), "{proxy}");
+    assert_eq!(r["proxies"][0]["item"], id.0, "{r}");
+    assert_eq!(r["proxies"][0]["proxy"], proxy);
+    assert!(r.get("warnings").is_none(), "{r}");
+    assert_eq!(s.history.undo.len(), before + 1, "the import and its proxy are one undo step");
+    s.execute("edit.undo", json!({})).unwrap();
+    assert!(s.project.item(id).is_none());
+}
+
+#[test]
+fn a_proxy_that_does_not_fit_is_reported_and_not_attached() {
+    let d = job("proxy-mismatch");
+    let mut s = Session::default();
+    s.execute("import.setRules", json!({"rules": proxy_rules()})).unwrap();
+    let r = s.execute("file.import", json!({"paths": [d.join("b.wav").to_string_lossy()]})).unwrap();
+    let id = ItemId(r["items"][0].as_u64().unwrap());
+    assert_eq!(proxy_of(&s, id), None, "the wrong proxy must not be attached");
+    let w = r["warnings"][0].as_str().unwrap_or_else(|| panic!("{r}"));
+    assert!(w.contains("was not attached") && w.contains("long"), "{w}");
+    assert!(r.get("proxies").is_none(), "{r}");
+    // the clip itself imported fine
+    assert!(s.project.item(id).is_some());
+}
+
+#[test]
+fn without_a_proxy_link_nothing_is_attached() {
+    let d = job("proxy-none");
+    let mut s = Session::default();
+    s.execute("import.setRules", json!({"rules": nlog_rules()})).unwrap();
+    let r = s.execute("file.import", json!({"paths": [d.join("a.wav").to_string_lossy()]})).unwrap();
+    assert_eq!(proxy_of(&s, ItemId(r["items"][0].as_u64().unwrap())), None);
+    assert!(r.get("proxies").is_none() && r.get("warnings").is_none());
+}
+
+#[test]
+fn applying_rules_attaches_proxies_to_clips_already_in_the_project() {
+    let d = job("proxy-apply");
+    let mut s = Session::default();
+    let (a, b) = (import(&mut s, &d.join("a.wav")), import(&mut s, &d.join("b.wav")));
+    assert_eq!((proxy_of(&s, a), proxy_of(&s, b)), (None, None));
+    s.execute("import.setRules", json!({"rules": proxy_rules()})).unwrap();
+    let before = s.history.undo.len();
+    let r = s.execute("project.applyInterpretRules", json!({})).unwrap();
+    assert_eq!(r["proxiesAttached"].as_array().unwrap().len(), 1, "{r}");
+    assert_eq!(r["proxiesAttached"][0]["item"], a.0);
+    assert_eq!(r["warnings"].as_array().unwrap().len(), 1, "b's proxy is the wrong length: {r}");
+    assert!(proxy_of(&s, a).is_some());
+    assert_eq!(proxy_of(&s, b), None);
+    assert_eq!(s.history.undo.len(), before + 1, "one undo step");
+    // a clip that already has a proxy keeps it, and applying again changes nothing
+    let r = s.execute("project.applyInterpretRules", json!({})).unwrap();
+    assert!(r["proxiesAttached"].as_array().unwrap().is_empty());
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(proxy_of(&s, a), None);
+}
+
+/// The attached proxy is what the media pool hands out when proxies are on, the clip itself otherwise (and for export).
+#[test]
+fn the_pool_plays_the_proxy_when_proxies_are_on_and_the_clip_for_export() {
+    let d = job("proxy-pool");
+    let mut s = Session::default();
+    s.execute("import.setRules", json!({"rules": proxy_rules()})).unwrap();
+    let r = s.execute("file.import", json!({"paths": [d.join("a.wav").to_string_lossy()]})).unwrap();
+    let id = ItemId(r["items"][0].as_u64().unwrap());
+    let proxy_dir = d.join("Proxy").to_string_lossy().into_owned();
+    let name_of = |src: filmcraft_media::SharedSource| src.info().name.clone();
+    assert_eq!(name_of(s.media.full_res_source(&s.project, id, &*s.services).unwrap()), "a.wav");
+    assert!(proxy_of(&s, id).unwrap().starts_with(&proxy_dir) || proxy_of(&s, id).unwrap().contains("/Proxy/"));
+    // proxies on: playback reads the proxy; the full-resolution source (what export uses) is still the clip
+    let mut prefs = s.prefs.clone();
+    prefs.media.enable_proxies = true;
+    s.set_prefs(prefs).unwrap();
+    assert!(s.media.use_proxies());
+    let playing = s.media.source_for(&s.project, id, &*s.services).unwrap();
+    let exporting = s.media.full_res_source(&s.project, id, &*s.services).unwrap();
+    assert_ne!(Arc::as_ptr(&playing) as *const u8, Arc::as_ptr(&exporting) as *const u8, "playback and export read different sources");
 }

@@ -282,29 +282,67 @@ pub fn poll(s: &mut Session) {
     }
 }
 
+/// Why `proxy` cannot stand in for `master`, if it cannot: its duration must be within one frame, its frame rate the same, and it
+/// needs video where the master has some. `strict` (a proxy found by an import rule, not chosen by hand) also compares the start
+/// timecode and the aspect ratio, so a proxy of another clip with a similar length is not taken for this one.
+pub(crate) fn proxy_problem(
+    master: &filmcraft_media::MediaInfo,
+    proxy: &filmcraft_media::MediaInfo,
+    name: &str,
+    proxy_path: &str,
+    strict: bool,
+) -> Option<String> {
+    let fd = master.frame_rate().frame_duration();
+    if (proxy.duration - master.duration).0.abs() > fd.0 {
+        return Some(format!(
+            "{}: the proxy is {:.3}s long but {name} is {:.3}s",
+            Path::new(proxy_path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            proxy.duration.seconds(),
+            master.duration.seconds()
+        ));
+    }
+    if let (Some(a), Some(b)) = (&proxy.video, &master.video)
+        && a.frame_rate != b.frame_rate
+    {
+        return Some(format!("the proxy runs at {} fps but {name} at {} fps", a.frame_rate.label(), b.frame_rate.label()));
+    }
+    if proxy.video.is_none() && master.video.is_some() {
+        return Some("the proxy has no video".into());
+    }
+    if strict {
+        if let (Some(a), Some(b)) = (proxy.start_timecode, master.start_timecode)
+            && a != b
+        {
+            return Some(format!("the proxy starts at timecode {a} but {name} at {b}"));
+        }
+        if let (Some(a), Some(b)) = (&proxy.video, &master.video) {
+            let (ra, rb) = (f64::from(a.width) / f64::from(a.height.max(1)), f64::from(b.width) / f64::from(b.height.max(1)));
+            if rb > 0.0 && ((ra - rb) / rb).abs() > 0.005 {
+                return Some(format!("the proxy is {}x{} but {name} is {}x{}: a different aspect ratio", a.width, a.height, b.width, b.height));
+            }
+        }
+    }
+    None
+}
+
 /// Check a proxy file against its clip: duration within one frame, same frame rate.
 fn check_proxy(s: &Session, item: ItemId, path: &str) -> Result<()> {
     let (clip, _, name) = media_path(&s.project, item).ok_or_else(|| bad("media.attachProxies", format!("item {} is not file media", item.0)))?;
     let src = s.media.open_file(path, &*s.services).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let pi = src.info();
-    let fd = clip.info.frame_rate().frame_duration();
-    if (pi.duration - clip.info.duration).0.abs() > fd.0 {
-        return Err(EngineError::Other(format!(
-            "{}: the proxy is {:.3}s long but {name} is {:.3}s",
-            Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-            pi.duration.seconds(),
-            clip.info.duration.seconds()
-        )));
+    match proxy_problem(&clip.info, src.info(), &name, path, false) {
+        Some(why) => Err(EngineError::Other(why)),
+        None => Ok(()),
     }
-    if let (Some(a), Some(b)) = (&pi.video, &clip.info.video)
-        && a.frame_rate != b.frame_rate
-    {
-        return Err(EngineError::Other(format!("the proxy runs at {} fps but {name} at {} fps", a.frame_rate.label(), b.frame_rate.label())));
+}
+
+/// Open the proxy file at `path` and check it against the master described by `info` (named `name`), strictly: the check for a
+/// proxy an import rule found. `Err` carries the reason it cannot be used.
+pub(crate) fn check_found_proxy(s: &Session, info: &filmcraft_media::MediaInfo, name: &str, path: &str) -> std::result::Result<(), String> {
+    let src = s.media.open_file(path, &*s.services).map_err(|e| format!("{path}: {e}"))?;
+    match proxy_problem(info, src.info(), name, path, true) {
+        Some(why) => Err(why),
+        None => Ok(()),
     }
-    if pi.video.is_none() && clip.info.video.is_some() {
-        return Err(EngineError::Other("the proxy has no video".into()));
-    }
-    Ok(())
 }
 
 /// Attach proxies (checked unless `force`). One undo step.
@@ -589,5 +627,70 @@ fn has_file_media(s: &Session) -> std::result::Result<(), String> {
         Ok(())
     } else {
         Err("the project has no file-based media".into())
+    }
+}
+
+#[cfg(test)]
+mod problem_tests {
+    use super::*;
+    use filmcraft_media::{MediaInfo, MediaKind, VideoStreamInfo};
+    use filmcraft_time::FrameRate;
+
+    fn info(seconds: f64, w: u32, h: u32, fps: FrameRate, tc: Option<i64>) -> MediaInfo {
+        MediaInfo {
+            name: "x".into(),
+            kind: MediaKind::Movie,
+            duration: Tick::from_seconds_f64(seconds),
+            video: Some(VideoStreamInfo {
+                width: w,
+                height: h,
+                frame_rate: fps,
+                par: (1, 1),
+                codec: "c".into(),
+                pixel_format: "p".into(),
+                color: filmcraft_color::ColorInfo::REC709,
+                has_alpha: false,
+                bitrate: None,
+                hdr: None,
+            }),
+            audio_streams: Vec::new(),
+            container: "c".into(),
+            start_timecode: tc,
+            file_size: None,
+        }
+    }
+
+    #[test]
+    fn a_matching_proxy_passes_both_checks() {
+        let (n, p) = (info(10.01, 4140, 2330, FrameRate::FPS_24, Some(4161)), info(10.01, 1920, 1080, FrameRate::FPS_24, Some(4161)));
+        assert_eq!(proxy_problem(&n, &p, "n", "p.mp4", false), None);
+        assert_eq!(proxy_problem(&n, &p, "n", "p.mp4", true), None);
+    }
+
+    #[test]
+    fn length_frame_rate_and_video_are_always_checked() {
+        let n = info(10.0, 1920, 1080, FrameRate::FPS_24, None);
+        assert!(proxy_problem(&n, &info(10.5, 1920, 1080, FrameRate::FPS_24, None), "n", "p.mp4", false).unwrap().contains("long"));
+        assert!(proxy_problem(&n, &info(10.0, 1920, 1080, FrameRate::FPS_25, None), "n", "p.mp4", false).unwrap().contains("fps"));
+        let mut audio_only = info(10.0, 1920, 1080, FrameRate::FPS_24, None);
+        audio_only.video = None;
+        assert!(proxy_problem(&n, &audio_only, "n", "p.mp4", false).unwrap().contains("no video"));
+        // within one frame is fine
+        assert_eq!(proxy_problem(&n, &info(10.0 + 1.0 / 24.0 - 0.001, 1920, 1080, FrameRate::FPS_24, None), "n", "p.mp4", false), None);
+    }
+
+    #[test]
+    fn a_proxy_found_by_rule_must_also_match_in_timecode_and_aspect() {
+        let n = info(10.0, 4140, 2330, FrameRate::FPS_24, Some(4161));
+        // the other clip of the shoot, a similar length: same everything but where it starts
+        let later = info(10.0, 1920, 1080, FrameRate::FPS_24, Some(9999));
+        assert_eq!(proxy_problem(&n, &later, "n", "p.mp4", false), None, "a proxy chosen by hand is not held to the timecode");
+        assert!(proxy_problem(&n, &later, "n", "p.mp4", true).unwrap().contains("timecode"));
+        // an unknown timecode on either side is not a mismatch
+        assert_eq!(proxy_problem(&n, &info(10.0, 1920, 1080, FrameRate::FPS_24, None), "n", "p.mp4", true), None);
+        // a 4:3 proxy of a 16:9 clip
+        assert!(proxy_problem(&n, &info(10.0, 1440, 1080, FrameRate::FPS_24, Some(4161)), "n", "p.mp4", true).unwrap().contains("aspect"));
+        // 4140x2330 against 1920x1080 differ by 0.06 percent: fine
+        assert_eq!(proxy_problem(&n, &info(10.0, 1920, 1080, FrameRate::FPS_24, Some(4161)), "n", "p.mp4", true), None);
     }
 }
