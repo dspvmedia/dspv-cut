@@ -629,3 +629,68 @@ fn log_input_gpu_matches_cpu() {
     }
     assert!(tested >= 16, "only {tested} cases ran");
 }
+
+/// The banded half-float read-back conversion gives exactly what converting row by row does, for every height (including ones that
+/// do not divide into the bands), pads between rows, and truncated data.
+#[test]
+fn half_float_rows_convert_the_same_in_bands() {
+    let (width, row_pad) = (700usize, 256usize); // rows padded to a 256-byte multiple, as the GPU's buffer is
+    let row = (width * 8).div_ceil(row_pad) * row_pad;
+    for h in [1usize, 2, 3, 5, 191, 192, 193, 400] {
+        let mut src = vec![0xAAu8; row * h];
+        for y in 0..h {
+            for x in 0..width * 4 {
+                let v = ((y * 31 + x * 7) % 2000) as f32 / 37.0 - 5.0;
+                src[y * row + x * 2..y * row + x * 2 + 2].copy_from_slice(&f32_to_f16(v).to_le_bytes());
+            }
+        }
+        let mut banded = vec![f32::NAN; width * 4 * h];
+        assert!(f16_rows_to_f32(&src, row, width, &mut banded), "h {h}");
+        for y in 0..h {
+            for x in 0..width * 4 {
+                let at = y * row + x * 2;
+                let want = f16_to_f32_fast(u16::from_le_bytes([src[at], src[at + 1]]));
+                assert_eq!(banded[y * width * 4 + x].to_bits(), want.to_bits(), "h {h} row {y} col {x}");
+            }
+        }
+    }
+    // data missing for the last row: refused, so stale pooled values are never passed on as a picture
+    let h = 400usize;
+    let src = vec![0u8; row * h - row / 2 - 1000];
+    let mut out = vec![0f32; width * 4 * h];
+    assert!(!f16_rows_to_f32(&src, row, width, &mut out));
+    // a length that is not a whole number of rows, or a zero width
+    assert!(!f16_rows_to_f32(&src, row, width, &mut vec![0f32; width * 4 * 3 + 1]));
+    assert!(!f16_rows_to_f32(&src, row, 0, &mut [0f32; 8]));
+}
+
+/// Serial against banded read-back conversion on a 3840x2160 frame, alternating in one process so machine load hits both
+/// equally. Run with `--release --ignored --nocapture`.
+#[test]
+#[ignore]
+fn half_float_readback_speed_serial_against_banded() {
+    let (width, h) = (3840usize, 2160usize);
+    let row = (width * 8).div_ceil(256) * 256;
+    let src: Vec<u8> = (0..row * h).map(|i| (i % 251) as u8).collect();
+    let mut out = vec![0f32; width * 4 * h];
+    let serial = |out: &mut [f32]| {
+        out.chunks_exact_mut(width * 4).enumerate().all(|(y, dst)| {
+            let s = &src[y * row..y * row + width * 8];
+            for (d, v) in dst.iter_mut().zip(s.as_chunks::<2>().0) {
+                *d = f16_to_f32_fast(u16::from_le_bytes(*v));
+            }
+            true
+        })
+    };
+    let time = |f: &mut dyn FnMut() -> bool| {
+        let t = std::time::Instant::now();
+        assert!(f());
+        t.elapsed().as_secs_f64() * 1e3
+    };
+    let (mut a, mut b) = (f64::MAX, f64::MAX);
+    for _ in 0..9 {
+        a = a.min(time(&mut || serial(&mut out)));
+        b = b.min(time(&mut || f16_rows_to_f32(&src, row, width, &mut out)));
+    }
+    eprintln!("SPEED 3840x2160 half to float, best of 9: serial {a:.1} ms, banded {b:.1} ms ({:.1}x)", a / b);
+}

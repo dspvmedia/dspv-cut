@@ -269,7 +269,12 @@ impl Exporter {
             f0,
             f1,
             next: f0,
-            batch: rayon::current_num_threads().clamp(2, 16) as i64,
+            // frames rendered at once: one per core by default; `FILMCRAFT_EXPORT_BATCH=n` lowers it on a machine short of memory (2 saved
+            // about 2 GB of a 4K N-RAW export; fewer parallel frames can also be slower)
+            batch: std::env::var("FILMCRAFT_EXPORT_BATCH")
+                .ok()
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or_else(|| rayon::current_num_threads().clamp(2, 16) as i64),
             overlap: true,
             budget: IN_FLIGHT_BUDGET,
             ahead: None,

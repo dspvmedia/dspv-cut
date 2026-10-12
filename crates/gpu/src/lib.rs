@@ -274,6 +274,45 @@ fn prepare_layers(layers: &[PlanLayer]) -> PreparedPlan {
     PreparedPlan { layers: layers.iter().map(|l| prepare_frame(&l.frame)).collect(), ..Default::default() }
 }
 
+/// Convert rows of RGBA half floats (`row` bytes apart in `src`) to `out`, `width * 4` floats a row, in a few bands on scoped
+/// threads: this runs while an export renderer is checked out of the pool, and a plain thread scope cannot steal another frame's
+/// job the way a nested rayon call can. `false` when `src` is too short for any row (`out` then holds stale values).
+fn f16_rows_to_f32(src: &[u8], row: usize, width: usize, out: &mut [f32]) -> bool {
+    let stride = width * 4;
+    if stride == 0 || !out.len().is_multiple_of(stride) {
+        return false;
+    }
+    let rows = out.len() / stride;
+    let convert = |first: usize, band: &mut [f32]| {
+        band.chunks_exact_mut(stride).enumerate().all(|(r, dst)| {
+            let y = first + r;
+            let Some(src) = y.checked_mul(row).and_then(|a| a.checked_add(width * 8).and_then(|b| src.get(a..b))) else { return false };
+            for (d, s) in dst.iter_mut().zip(src.as_chunks::<2>().0) {
+                *d = f16_to_f32_fast(u16::from_le_bytes(*s));
+            }
+            true
+        })
+    };
+    // small frames are not worth the threads
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 4);
+    if threads == 1 || out.len() < (1 << 20) {
+        return convert(0, out);
+    }
+    let rows_per = rows.div_ceil(threads);
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = out
+            .chunks_mut(rows_per * stride)
+            .enumerate()
+            .map(|(i, band)| {
+                let convert = &convert;
+                scope.spawn(move || convert(i * rows_per, band))
+            })
+            .collect();
+        // a band that panicked counts as not converted
+        handles.into_iter().all(|h| h.join().unwrap_or(false))
+    })
+}
+
 impl GpuCompositor {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -1106,14 +1145,7 @@ impl GpuCompositor {
         let (width, row) = (w as usize, row as usize);
         let mut out = filmcraft_frame::pool::take_f32_overwritten(width.checked_mul(h as usize)?.checked_mul(4)?);
         let data = slice.get_mapped_range().ok()?;
-        // every row must be there: the pooled output holds stale values until written
-        let converted = out.chunks_exact_mut(width * 4).enumerate().all(|(y, dst)| {
-            let Some(src) = data.get(y * row..y * row + width * 8) else { return false };
-            for (d, s) in dst.iter_mut().zip(src.as_chunks::<2>().0) {
-                *d = f16_to_f32_fast(u16::from_le_bytes(*s));
-            }
-            true
-        });
+        let converted = f16_rows_to_f32(&data, row, width, &mut out);
         drop(data);
         buf.unmap();
         export_renderer::timing::add_convert(t.elapsed());
