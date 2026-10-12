@@ -615,7 +615,7 @@ pub struct PcmConfig {
 impl PcmConfig {
     /// Bytes per interleaved audio frame (all channels).
     pub fn bytes_per_frame(&self) -> u32 {
-        (self.bits as u32).div_ceil(8) * self.channels.max(1)
+        (self.bits as u32).div_ceil(8).saturating_mul(self.channels.max(1))
     }
 }
 
@@ -1009,8 +1009,16 @@ pub(crate) fn parse_sample_entry(format: FourCc, payload: &[u8], handler: FourCc
             let _size_of_struct = c.u32()?;
             a.sample_rate = c.f64()?;
             a.channels = c.u32()?;
+            // The version 0 layout caps channels at 16 bits; hold version 2 to the same ceiling so a corrupt or hostile entry
+            // cannot make later stages allocate one buffer per billion channels or overflow a frame-size multiply.
+            if a.channels > u32::from(u16::MAX) {
+                return Err(Error::TooLarge("sound description channel count"));
+            }
             let _always = c.u32()?;
             a.const_bits_per_channel = c.u32()?;
+            if a.const_bits_per_channel > u32::from(u16::MAX) {
+                return Err(Error::TooLarge("sound description bits per channel"));
+            }
             a.lpcm_flags = c.u32()?;
             a.const_bytes_per_packet = c.u32()?;
             a.const_frames_per_packet = c.u32()?;
@@ -1757,6 +1765,24 @@ mod tests {
         v0[9] = 0;
         let e = parse_sample_entry(FourCc(*b"lpcm"), &v0, FourCc(*b"soun"), false).expect("parses");
         assert_eq!(e.audio.expect("audio").qt_version, 0);
+    }
+
+    #[test]
+    fn sound_description_v2_with_absurd_channel_or_bit_counts_is_rejected() {
+        // channels is the u32 at offset 40, bits per channel the u32 at offset 48
+        for (off, v) in [(40usize, u32::MAX), (40, 65_536), (48, u32::MAX), (48, 65_536)] {
+            let mut b = NIKON_LPCM_V2;
+            b[off..off + 4].copy_from_slice(&v.to_be_bytes());
+            assert!(parse_sample_entry(FourCc(*b"lpcm"), &b, FourCc(*b"soun"), false).is_err(), "offset {off} value {v}");
+        }
+        // the ceiling itself is still accepted, and its frame size cannot overflow
+        let mut b = NIKON_LPCM_V2;
+        b[40..44].copy_from_slice(&65_535u32.to_be_bytes());
+        b[48..52].copy_from_slice(&65_535u32.to_be_bytes());
+        let e = parse_sample_entry(FourCc(*b"lpcm"), &b, FourCc(*b"soun"), false).expect("parses");
+        let CodecConfig::Pcm(p) = e.codec else { panic!("expected PCM") };
+        assert_eq!(p.bytes_per_frame(), 8192 * 65_535);
+        assert_eq!(PcmConfig { bits: u16::MAX, channels: u32::MAX, ..Default::default() }.bytes_per_frame(), u32::MAX);
     }
 
     #[test]
