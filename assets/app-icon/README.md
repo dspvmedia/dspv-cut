@@ -35,7 +35,7 @@ palette and traces the ink with potrace. Licence: [LICENSE.txt](LICENSE.txt) (MI
 | `filmcraft.svg` | canonical artwork, traced at 2048 px (about 1 MB) |
 | `filmcraft-small.svg` | lighter trace at 1024 px (about 450 KB), for when size matters |
 | `filmcraft-1024.png` | 1024 px render |
-| `filmcraft-macos-512.png` | runtime Dock icon on macOS (embedded by `apps/filmcraft/src/main.rs`) |
+| `filmcraft-macos-512.png` | runtime Dock icon on macOS (embedded by `apps/filmcraft/src/lib.rs`) |
 | `filmcraft.icns` | macOS bundle icon (`CFBundleIconFile`) |
 | `filmcraft.ico` | Windows icon, 16–256 px (embedded in `filmcraft.exe` by `apps/filmcraft/build.rs`) |
 | `hicolor/<size>/apps/ai.storyteller.filmcraft.png`, `hicolor/scalable/…svg` | Linux icon theme, used by `packaging/linux/ai.storyteller.filmcraft.desktop` |

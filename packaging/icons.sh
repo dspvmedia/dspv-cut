@@ -26,7 +26,7 @@ grep -q 'viewBox="-62.14' "$MAC" || { echo "error: unexpected viewBox in $SVG" >
 render() { resvg -w "$2" -h "$2" "$1" "$3" </dev/null; }
 
 render "$SVG" 1024 "$DIR/filmcraft-1024.png"
-# Runtime window/Dock icon on macOS (apps/filmcraft/src/main.rs embeds it).
+# Runtime window/Dock icon on macOS (apps/filmcraft/src/lib.rs embeds it).
 render "$MAC" 512 "$DIR/filmcraft-macos-512.png"
 
 # Linux hicolor theme. Windows and Linux use the full-bleed tile.
