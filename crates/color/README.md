@@ -38,8 +38,14 @@ for limited- and full-range files.
 | ARRI LogC4 | ARRI Wide Gamut 4 | ARRI, *ARRI LogC4 Logarithmic Color Space — Specification* (2022) | CV | a = (2¹⁸ − 16)/117.45, b = 928/1023, c = 95/1023, s = 7·ln2·2^(7 − 14c/b)/(a·b), t = (2^(6 − 14c/b) − 64)/a; y ≥ 0: x = (2^(14(y − c)/b + 6) − 64)/a; else x = y·s + t |
 | Apple Log | BT.2020 | Apple, *Apple Log Profile* white paper (2023) | IRE | R0 = −0.05641088, Rt = 0.01, c = 47.28711236, β = 0.00964052, γ = 0.08550479, δ = 0.69336945; P ≥ c(Rt − R0)²: x = 2^((P − δ)/γ) − β; else x = √(P/c) + R0 |
 | DJI D-Log | D-Gamut | DJI, *White Paper on D-Log and D-Gamut of DJI Cinema Color System* (2017) | CV | y ≤ 0.14: x = (y − 0.0929)/6.025; else x = (10^(3.89616y − 2.27752) − 0.0108)/0.9892 |
+| Nikon N-Log | BT.2020 | Nikon, *N-Log Specification Document* version 1.0.0 (2018-09-01) | CV | code x = 1023y; x < 452: reflectance = (x/650)³ − 0.0075; else reflectance = exp((x − 619)/150) |
+| RED Log3G10 | REDWideGamutRGB | RED Digital Cinema, *White Paper on REDWideGamutRGB and Log3G10* (2017) | CV | y < 0: x = y/15.1927 − 0.01; else x = (10^(y/0.224282) − 1)/155.975327 − 0.01 |
 
-The encoders are the exact inverses given in the same documents. DJI **D-Log M** is not
+The encoders are the exact inverses given in the same documents. The one exception is Nikon N-Log: its
+document gives the encoder's branch point as reflectance 0.328 and the decoder's as code 452, which are
+not quite the same place, so encode and decode agree to better than 4·10⁻⁴ in reflectance near that
+seam (a test pins the bound) and both follow the document as written. N-Log encode: x = 650·(y + 0.0075)^(1/3)
+for y < 0.328, else 150·ln(y) + 619 (x in 10-bit code values). DJI **D-Log M** is not
 implemented: DJI has not published its formula (only conversion LUTs), and we do not derive curves
 from third-party LUTs. (Checked again in October 2026: DJI's published white papers cover D-Log /
 D-Gamut only; D-Log M remains unsupported, so D-Log M footage should be interpreted with a LUT.)
@@ -58,6 +64,7 @@ Gamut primaries (all D65 white, x/y):
 | ARRI Wide Gamut 3 | 0.6840, 0.3130 | 0.2210, 0.8480 | 0.0861, −0.1020 | ARRI Log C document |
 | ARRI Wide Gamut 4 | 0.7347, 0.2653 | 0.1424, 0.8576 | 0.0991, −0.0308 | ARRI LogC4 specification |
 | D-Gamut | 0.71, 0.31 | 0.21, 0.88 | 0.09, −0.08 | DJI white paper |
+| REDWideGamutRGB | 0.780308, 0.304253 | 0.121595, 1.493994 | 0.095612, −0.084589 | RED white paper (D65 white) |
 
 Matrices are derived from the chromaticities (SMPTE RP 177 normalised primary matrix); tests check
 the result against the published BT.709 RGB→XYZ and BT.2087 BT.709→BT.2020 matrices.
@@ -138,6 +145,6 @@ FilmCraft ships no LUT files. Its built-in looks and camera conversions are gene
 `cargo test -p filmcraft-color`: encode∘decode round trips for every curve (−1 % to 8× and over
 the full signal range in both file ranges), published reference points (S-Log3 95/420/598, V-Log
 128/433/602, LogC3 18 % → 0.391, LogC4 18 % → 0.2784, Canon Log 2/3 18 % → 39.2 %/34.3 % IRE, Apple
-Log 18 % → 0.488, D-Log 0 → 0.0929), PQ/HLG reference white, EETF continuity/monotonicity and peak,
+Log 18 % → 0.488, D-Log 0 → 0.0929, N-Log 18 % → code 372 and black → 127.2, Log3G10 −0.01 → 0 and 18 % → 1/3 and 184.322 → 1.0), the REDWideGamutRGB ↔ Rec. 2020 matrices against RED's published values, PQ/HLG reference white, EETF continuity/monotonicity and peak,
 hue preservation, gamut compression, BT.709/BT.2087 matrices, LUT interpolation and file round
 trips.

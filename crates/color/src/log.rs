@@ -42,11 +42,25 @@ pub enum LogCurve {
     AppleLog,
     /// DJI D-Log.
     DLog,
+    /// Nikon N-Log (Z-series cameras, N-RAW and H.265/ProRes log).
+    NLog,
+    /// RED Log3G10 (R3D, and Nikon N-RAW decoded through the RED SDK).
+    Log3G10,
 }
 
 impl LogCurve {
-    pub const ALL: [LogCurve; 8] =
-        [LogCurve::SLog3, LogCurve::VLog, LogCurve::CLog2, LogCurve::CLog3, LogCurve::LogC3, LogCurve::LogC4, LogCurve::AppleLog, LogCurve::DLog];
+    pub const ALL: [LogCurve; 10] = [
+        LogCurve::SLog3,
+        LogCurve::VLog,
+        LogCurve::CLog2,
+        LogCurve::CLog3,
+        LogCurve::LogC3,
+        LogCurve::LogC4,
+        LogCurve::AppleLog,
+        LogCurve::DLog,
+        LogCurve::NLog,
+        LogCurve::Log3G10,
+    ];
 
     pub fn domain(self) -> Domain {
         match self {
@@ -65,6 +79,8 @@ impl LogCurve {
             LogCurve::LogC4 => "ARRI LogC4",
             LogCurve::AppleLog => "Apple Log",
             LogCurve::DLog => "DJI D-Log",
+            LogCurve::NLog => "Nikon N-Log",
+            LogCurve::Log3G10 => "RED Log3G10",
         }
     }
 
@@ -79,6 +95,8 @@ impl LogCurve {
             LogCurve::LogC4 => logc4_encode(x),
             LogCurve::AppleLog => apple_log_encode(x),
             LogCurve::DLog => dlog_encode(x),
+            LogCurve::NLog => nlog_encode(x),
+            LogCurve::Log3G10 => log3g10_encode(x),
         }
     }
 
@@ -93,6 +111,8 @@ impl LogCurve {
             LogCurve::LogC4 => logc4_decode(y),
             LogCurve::AppleLog => apple_log_decode(y),
             LogCurve::DLog => dlog_decode(y),
+            LogCurve::NLog => nlog_decode(y),
+            LogCurve::Log3G10 => log3g10_decode(y),
         }
     }
 
@@ -262,6 +282,50 @@ pub fn dlog_decode(y: f64) -> f64 {
     if y <= 0.14 { (y - 0.0929) / 6.025 } else { (10f64.powf(3.896_16 * y - 2.277_52) - 0.0108) / 0.9892 }
 }
 
+// ---------------------------------------------------------------- Nikon N-Log
+// Nikon, "N-Log Specification Document" version 1.0.0 (2018-09-01). Reflectance y (18 % grey =
+// 0.18, "stop 0") to the 10-bit code value x:
+//     y < 0.328:  x = 650 · (y + 0.0075)^(1/3)        else:  x = 150 · ln(y) + 619
+// and back (the document's decode branch point is code 452):
+//     x < 452:    y = (x / 650)^3 − 0.0075            else:  y = exp((x − 619) / 150)
+// Colour gamut BT.2020 primaries, D65 white point. The document's two encode branches meet within
+// 0.1 code value of each other at y = 0.328 and the decode branch point is rounded to code 452, so
+// encode and decode are inverse to better than 4·10⁻⁴ in reflectance, not exactly (the seam test
+// below pins that down). Both functions follow the document as written.
+
+pub fn nlog_encode(x: f64) -> f64 {
+    let code = if x < 0.328 { 650.0 * (x + 0.0075).cbrt() } else { 150.0 * x.ln() + 619.0 };
+    code / 1023.0
+}
+pub fn nlog_decode(y: f64) -> f64 {
+    let code = y * 1023.0;
+    if code < 452.0 {
+        let r = code / 650.0;
+        r * r * r - 0.0075
+    } else {
+        ((code - 619.0) / 150.0).exp()
+    }
+}
+
+// ---------------------------------------------------------------- RED Log3G10
+// RED Digital Cinema, "White Paper on REDWideGamutRGB and Log3G10" (2017). Scene-linear x (18 %
+// grey = 0.18 → 1/3, 10 stops above grey = 184.322 → 1.0), full-scale 0..1 signal. An offset c
+// puts the toe at x = −0.01, and below that the curve continues as a straight line of gradient g
+// (the slope of the log section at the toe).
+
+const LOG3G10_A: f64 = 0.224_282;
+const LOG3G10_B: f64 = 155.975_327;
+const LOG3G10_C: f64 = 0.01;
+const LOG3G10_G: f64 = 15.1927;
+
+pub fn log3g10_encode(x: f64) -> f64 {
+    let v = x + LOG3G10_C;
+    if v < 0.0 { v * LOG3G10_G } else { LOG3G10_A * (v * LOG3G10_B + 1.0).log10() }
+}
+pub fn log3g10_decode(y: f64) -> f64 {
+    if y < 0.0 { y / LOG3G10_G - LOG3G10_C } else { (10f64.powf(y / LOG3G10_A) - 1.0) / LOG3G10_B - LOG3G10_C }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,6 +336,10 @@ mod tests {
             for i in 0..=400 {
                 // −1 % … 40× mid grey
                 let x = -0.01 + (i as f64 / 400.0).powi(3) * 8.0;
+                // Nikon's published N-Log branches do not meet exactly at 0.328 (see `nlog_seam_is_tiny`).
+                if c == LogCurve::NLog && (0.327..0.330).contains(&x) {
+                    continue;
+                }
                 let y = c.encode(x);
                 let back = c.decode(y);
                 assert!((back - x).abs() <= 1e-6 * x.abs().max(1.0) + 1e-9, "{c:?}: {x} → {y} → {back}");
@@ -317,6 +385,48 @@ mod tests {
         // DJI D-Log: 0 → 0.0929, 18 % → 0.398 (white paper).
         close(LogCurve::DLog.encode(0.0), 0.0929, 1e-9, "D-Log 0");
         close(LogCurve::DLog.encode(0.18), 0.398, 0.002, "D-Log 18%");
+        // Nikon N-Log: 18 % grey → code 372 (650·(0.1875)^(1/3) = 372.03, about 36 % of full scale),
+        // black 0 → 650·0.0075^(1/3) = 127.2, and the log branch passes through 150·ln(1)+619 = 619
+        // at reflectance 1.0.
+        close(cv(LogCurve::NLog, 0.18), 372.03, 0.01, "N-Log 18%");
+        close(cv(LogCurve::NLog, 0.0), 127.2, 0.1, "N-Log 0");
+        close(cv(LogCurve::NLog, 1.0), 619.0, 1e-9, "N-Log 100%");
+        // RED Log3G10 (white paper table): −0.01 → 0, 18 % grey → 1/3, 184.322 → 1.0.
+        close(LogCurve::Log3G10.encode(-0.01), 0.0, 1e-12, "Log3G10 toe");
+        close(LogCurve::Log3G10.encode(0.18), 1.0 / 3.0, 2e-6, "Log3G10 18%");
+        close(LogCurve::Log3G10.encode(184.322), 1.0, 2e-6, "Log3G10 white");
+        close(LogCurve::Log3G10.peak_linear(), 184.322, 0.01, "Log3G10 peak");
+    }
+
+    /// Nikon's published N-Log encode and decode are not exact inverses at the seam (the document
+    /// rounds the decode branch point to code 452): bound how far apart they can be.
+    #[test]
+    fn nlog_seam_is_tiny() {
+        let mut worst = 0.0f64;
+        for i in 0..=2000 {
+            let x = 0.320 + f64::from(i) * 1e-5; // 0.320 … 0.340
+            let back = LogCurve::NLog.decode(LogCurve::NLog.encode(x));
+            worst = worst.max((back - x).abs());
+        }
+        assert!(worst < 4e-4, "N-Log seam error {worst}");
+        // The signal stays strictly increasing across the seam.
+        let mut prev = f64::NEG_INFINITY;
+        for i in 0..=2000 {
+            let y = LogCurve::NLog.encode(0.320 + f64::from(i) * 1e-5);
+            assert!(y > prev, "N-Log encode not increasing at {i}");
+            prev = y;
+        }
+    }
+
+    /// Hostile inputs give finite or infinite numbers, never a panic or NaN.
+    #[test]
+    fn new_curves_survive_hostile_values() {
+        for c in [LogCurve::NLog, LogCurve::Log3G10] {
+            for v in [0.0, -0.0, 1e-300, -1e-300, 1e300, -1e300, f64::MAX, f64::MIN, f64::INFINITY, f64::NEG_INFINITY] {
+                assert!(!c.encode(v).is_nan(), "{c:?} encode({v}) is NaN");
+                assert!(!c.decode(v).is_nan(), "{c:?} decode({v}) is NaN");
+            }
+        }
     }
 
     #[test]

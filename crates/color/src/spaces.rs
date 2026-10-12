@@ -34,6 +34,8 @@ pub enum Gamut {
     Awg4,
     /// DJI D-Gamut.
     DGamut,
+    /// RED REDWideGamutRGB.
+    RedWideGamut,
 }
 
 impl Gamut {
@@ -51,6 +53,7 @@ impl Gamut {
             Gamut::Awg3 => [[0.6840, 0.3130], [0.2210, 0.8480], [0.0861, -0.1020]],
             Gamut::Awg4 => [[0.7347, 0.2653], [0.1424, 0.8576], [0.0991, -0.0308]],
             Gamut::DGamut => [[0.71, 0.31], [0.21, 0.88], [0.09, -0.08]],
+            Gamut::RedWideGamut => [[0.780_308, 0.304_253], [0.121_595, 1.493_994], [0.095_612, -0.084_589]],
         }
     }
 
@@ -165,12 +168,16 @@ pub enum ColorSpace {
     /// Apple Log (BT.2020 primaries).
     AppleLog,
     DLogDGamut,
+    /// Nikon N-Log (BT.2020 primaries, D65), as in N-RAW proxies and Z-series log video.
+    NLogBt2020,
+    /// RED Log3G10 / REDWideGamutRGB (R3D, and Nikon N-RAW decoded through the RED SDK).
+    Log3G10RedWideGamut,
     /// Linear light with BT.709 primaries (EXR-style float sources).
     Linear709,
 }
 
 impl ColorSpace {
-    pub const ALL: [ColorSpace; 16] = [
+    pub const ALL: [ColorSpace; 18] = [
         ColorSpace::Rec709,
         ColorSpace::Srgb,
         ColorSpace::Rec2020,
@@ -186,6 +193,8 @@ impl ColorSpace {
         ColorSpace::LogC4Awg4,
         ColorSpace::AppleLog,
         ColorSpace::DLogDGamut,
+        ColorSpace::NLogBt2020,
+        ColorSpace::Log3G10RedWideGamut,
         ColorSpace::Linear709,
     ];
 
@@ -207,6 +216,8 @@ impl ColorSpace {
             ColorSpace::LogC4Awg4 => "logc4-awg4",
             ColorSpace::AppleLog => "applelog",
             ColorSpace::DLogDGamut => "dlog-dgamut",
+            ColorSpace::NLogBt2020 => "nlog-bt2020",
+            ColorSpace::Log3G10RedWideGamut => "log3g10-rwg",
             ColorSpace::Linear709 => "linear709",
         }
     }
@@ -228,6 +239,8 @@ impl ColorSpace {
             ColorSpace::LogC4Awg4 => "ARRI LogC4 / ARRI Wide Gamut 4",
             ColorSpace::AppleLog => "Apple Log / Rec. 2020",
             ColorSpace::DLogDGamut => "DJI D-Log / D-Gamut",
+            ColorSpace::NLogBt2020 => "Nikon N-Log / Rec. 2020",
+            ColorSpace::Log3G10RedWideGamut => "RED Log3G10 / REDWideGamutRGB",
             ColorSpace::Linear709 => "Linear (Rec. 709 primaries)",
         }
     }
@@ -242,7 +255,7 @@ impl ColorSpace {
     pub fn gamut(self) -> Gamut {
         match self {
             ColorSpace::Rec709 | ColorSpace::Srgb | ColorSpace::Linear709 => Gamut::Bt709,
-            ColorSpace::Rec2020 | ColorSpace::Rec2100Pq | ColorSpace::Rec2100Hlg | ColorSpace::AppleLog => Gamut::Bt2020,
+            ColorSpace::Rec2020 | ColorSpace::Rec2100Pq | ColorSpace::Rec2100Hlg | ColorSpace::AppleLog | ColorSpace::NLogBt2020 => Gamut::Bt2020,
             ColorSpace::P3D65 => Gamut::P3D65,
             ColorSpace::SLog3SGamut3Cine => Gamut::SGamut3Cine,
             ColorSpace::SLog3SGamut3 => Gamut::SGamut3,
@@ -251,6 +264,7 @@ impl ColorSpace {
             ColorSpace::LogC3Awg3 => Gamut::Awg3,
             ColorSpace::LogC4Awg4 => Gamut::Awg4,
             ColorSpace::DLogDGamut => Gamut::DGamut,
+            ColorSpace::Log3G10RedWideGamut => Gamut::RedWideGamut,
         }
     }
 
@@ -269,6 +283,8 @@ impl ColorSpace {
             ColorSpace::LogC4Awg4 => Curve::Log(LogCurve::LogC4),
             ColorSpace::AppleLog => Curve::Log(LogCurve::AppleLog),
             ColorSpace::DLogDGamut => Curve::Log(LogCurve::DLog),
+            ColorSpace::NLogBt2020 => Curve::Log(LogCurve::NLog),
+            ColorSpace::Log3G10RedWideGamut => Curve::Log(LogCurve::Log3G10),
         }
     }
 
@@ -392,7 +408,7 @@ mod tests {
             }
         }
         // white maps to white for every gamut pair
-        for a in [Gamut::SGamut3Cine, Gamut::Awg4, Gamut::CinemaGamut, Gamut::DGamut, Gamut::VGamut] {
+        for a in [Gamut::SGamut3Cine, Gamut::Awg4, Gamut::CinemaGamut, Gamut::DGamut, Gamut::VGamut, Gamut::RedWideGamut] {
             let w = mul_vec(&gamut_matrix(a, Gamut::Bt709), [1.0, 1.0, 1.0]);
             assert!(w.iter().all(|v| (v - 1.0).abs() < 1e-9), "{a:?}: {w:?}");
             let back = mul(&gamut_matrix(Gamut::Bt709, a), &gamut_matrix(a, Gamut::Bt709));
@@ -402,6 +418,34 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn red_wide_gamut_matrices_match_red_white_paper() {
+        // RED, "White Paper on REDWideGamutRGB and Log3G10", matrices to and from REC2020 (6 places).
+        // `gamut_matrix(a, b)` converts linear RGB from gamut `a` to gamut `b`.
+        let to_2020 = [[1.180_431, -0.094_040, -0.086_391], [-0.028_017, 1.311_442, -0.283_425], [-0.074_360, -0.362_078, 1.436_437]];
+        let from_2020 = [[0.853_263, 0.079_695, 0.067_042], [0.029_375, 0.809_195, 0.161_430], [0.051_575, 0.208_097, 0.740_329]];
+        for (m, want, what) in [
+            (gamut_matrix(Gamut::RedWideGamut, Gamut::Bt2020), to_2020, "RWG to 2020"),
+            (gamut_matrix(Gamut::Bt2020, Gamut::RedWideGamut), from_2020, "2020 to RWG"),
+        ] {
+            for i in 0..3 {
+                for j in 0..3 {
+                    assert!((m[i][j] - want[i][j]).abs() < 2e-5, "{what} {i}{j}: {} vs {}", m[i][j], want[i][j]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn nikon_and_red_spaces_are_log_spaces() {
+        assert_eq!(ColorSpace::NLogBt2020.gamut(), Gamut::Bt2020);
+        assert_eq!(ColorSpace::Log3G10RedWideGamut.gamut(), Gamut::RedWideGamut);
+        assert!(ColorSpace::NLogBt2020.is_log() && ColorSpace::Log3G10RedWideGamut.is_log());
+        assert_eq!(ColorSpace::parse("Nikon N-Log"), None, "needs the gamut in the label");
+        assert_eq!(ColorSpace::parse("nlog-bt2020"), Some(ColorSpace::NLogBt2020));
+        assert_eq!(ColorSpace::parse("RED Log3G10 / REDWideGamutRGB"), Some(ColorSpace::Log3G10RedWideGamut));
     }
 
     #[test]
