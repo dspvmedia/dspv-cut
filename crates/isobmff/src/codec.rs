@@ -1002,7 +1002,10 @@ pub(crate) fn parse_sample_entry(format: FourCc, payload: &[u8], handler: FourCc
             a.bytes_per_packet = c.u32()?;
             a.bytes_per_frame = c.u32()?;
             a.bytes_per_sample = c.u32()?;
-        } else if is_qt && a.qt_version == 2 {
+        } else if a.qt_version == 2 {
+            // QuickTime sound description version 2. ISO base media defines no version 2, so the version number alone identifies
+            // this layout, even in a file that is not branded `qt  ` (Nikon N-RAW files are branded `niko`; without this their
+            // 48 kHz stereo 24-bit audio read as 1 Hz, 3 channels).
             let _size_of_struct = c.u32()?;
             a.sample_rate = c.f64()?;
             a.channels = c.u32()?;
@@ -1720,5 +1723,54 @@ mod tests {
     fn asc_parse() {
         assert_eq!(parse_asc(&[0x11, 0x90]), Some((2, 48000, 2)));
         assert_eq!(parse_asc(&[]), None);
+    }
+
+    /// The 64-byte `lpcm` sample entry body from a Nikon N-RAW (.NEV) file. The file's major brand is `niko`, not `qt  `, so
+    /// `is_qt` is false: the version 2 fields must still be read (48 kHz, 2 channels, 24-bit little-endian, packed).
+    const NIKON_LPCM_V2: [u8; 64] = [
+        0, 0, 0, 0, 0, 0, 0, 1, // reserved, data reference index
+        0, 2, 0, 0, 0, 0, 0, 0, // version 2, revision, vendor
+        0, 3, 0, 16, 0xff, 0xfe, 0, 0, // always3, always16, alwaysMinus2, always0
+        0, 1, 0, 0, 0, 0, 0, 0x48, // always65536, size of struct
+        0x40, 0xe7, 0x70, 0, 0, 0, 0, 0, // sample rate: 48000.0 as a big-endian f64
+        0, 0, 0, 2, 0x7f, 0, 0, 0, // channels, always7F000000
+        0, 0, 0, 24, 0, 0, 0, 0x0c, // bits per channel, flags (signed integer | packed; little-endian)
+        0, 0, 0, 6, 0, 0, 0, 1, // bytes per packet, frames per packet
+    ];
+
+    #[test]
+    fn quicktime_sound_description_v2_is_read_in_a_non_quicktime_brand() {
+        let e = parse_sample_entry(FourCc(*b"lpcm"), &NIKON_LPCM_V2, FourCc(*b"soun"), false).expect("parses");
+        let a = e.audio.expect("an audio entry");
+        assert_eq!((a.qt_version, a.channels, a.sample_rate as u32, a.const_bits_per_channel, a.lpcm_flags), (2, 2, 48000, 24, 0x0c));
+        let CodecConfig::Pcm(p) = e.codec else { panic!("expected PCM, got {:?}", e.codec) };
+        assert_eq!((p.channels, p.sample_rate as u32, p.bits, p.big_endian, p.signed, p.float), (2, 48000, 24, false, true, false));
+        // a QuickTime-branded file reads it the same way
+        let q = parse_sample_entry(FourCc(*b"lpcm"), &NIKON_LPCM_V2, FourCc(*b"soun"), true).expect("parses");
+        assert_eq!(q.codec, CodecConfig::Pcm(p));
+    }
+
+    #[test]
+    fn version_zero_entries_in_non_quicktime_files_are_unaffected() {
+        // the same bytes but version 0: the plain 16-bit layout, never the v2 fields
+        let mut v0 = NIKON_LPCM_V2;
+        v0[9] = 0;
+        let e = parse_sample_entry(FourCc(*b"lpcm"), &v0, FourCc(*b"soun"), false).expect("parses");
+        assert_eq!(e.audio.expect("audio").qt_version, 0);
+    }
+
+    #[test]
+    fn truncated_and_corrupt_sound_descriptions_never_panic() {
+        for n in 0..=NIKON_LPCM_V2.len() {
+            let _ = parse_sample_entry(FourCc(*b"lpcm"), &NIKON_LPCM_V2[..n], FourCc(*b"soun"), false);
+        }
+        // every single-byte corruption
+        for i in 0..NIKON_LPCM_V2.len() {
+            for v in [0u8, 0x7f, 0xff] {
+                let mut b = NIKON_LPCM_V2;
+                b[i] = v;
+                let _ = parse_sample_entry(FourCc(*b"lpcm"), &b, FourCc(*b"soun"), false);
+            }
+        }
     }
 }
