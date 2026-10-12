@@ -653,6 +653,11 @@ fn import_source(
         v.frame_rate = crate::settings::timebase_rate(&s.prefs.media.indeterminate_timebase);
     }
     let path_s = path.to_string();
+    // Import rules (`import.setRules`): the colour space this file is interpreted with, set in the import's own undo step
+    let interpret = filmcraft_project::Interpretation {
+        color_space: crate::interpret_rules::resolve(&s.prefs.import_rules.rules, path, &*s.services),
+        ..Default::default()
+    };
     let id = s.edit(&format!("Import {name}"), |p, _| {
         Ok(p.add_item(
             &name,
@@ -660,7 +665,7 @@ fn import_source(
             ItemKind::Media(MediaClip {
                 media: MediaRef::File { path: path_s },
                 info,
-                interpret: Default::default(),
+                interpret,
                 mark_in: None,
                 mark_out: None,
                 markers: vec![],
@@ -3290,6 +3295,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::multicam::commands());
     v.extend(crate::essential_sound::commands());
     v.extend(crate::color::commands());
+    v.extend(crate::interpret_rules::commands());
     v.extend(crate::graphics::commands());
     v.extend(crate::graphic_templates::commands());
     v.extend(crate::shortcuts::commands());

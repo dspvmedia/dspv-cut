@@ -374,6 +374,7 @@
 	Cancel	Cancelar
 	OK	Aceptar
 	Interpret Footage	Interpretar material
+	Apply Import Rules	Aplicar reglas de importación
 	Color Management · {n} item	Gestión del color · {n} elemento
 	Color Management · {n} items	Gestión del color · {n} elementos
 	Media colour space (from file metadata): {detected}	Espacio de color del medio (según los metadatos del archivo): {detected}

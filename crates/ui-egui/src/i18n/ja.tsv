@@ -375,6 +375,7 @@
 	Cancel	キャンセル
 	OK	OK
 	Interpret Footage	素材を解釈
+	Apply Import Rules	インポートルールを適用
 	Color Management · {n} item	カラーマネジメント · {n} 項目
 	Color Management · {n} items	カラーマネジメント · {n} 項目
 	Media colour space (from file metadata): {detected}	メディアのカラースペース (ファイルのメタデータから): {detected}

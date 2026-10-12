@@ -176,6 +176,9 @@ pub const STILL_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "ti
 pub const AUDIO_EXTENSIONS: &[&str] = &["wav", "wave", "bwf", "aif", "aiff", "mp3", "mp2", "m4a", "aac", "flac", "ogg", "opus"];
 pub const VIDEO_EXTENSIONS: &[&str] = &[
     "mp4", "m4v", "mov", "mkv", "webm", "avi", "mxf", "mts", "m2ts", "m2t", "ts", "mpg", "mpeg", "vob", "mod", "tod", "m2v", "m1v", "mpv", "3gp", "y4m", "apv",
+    // Nikon N-RAW: an ISO container whose picture a registered reader opener decodes; listing it here makes import stream it
+    // through the openers instead of reading the whole (multi-gigabyte) file and opening it as plain bytes
+    "nev",
 ];
 
 pub fn is_importable(path: &Path) -> bool {
@@ -253,5 +256,14 @@ mod importable_tests {
             assert!(is_importable(Path::new(name)), "{name}");
         }
         assert!(!is_importable(Path::new("notes.txt")));
+    }
+
+    /// `file.import` streams a file through the reader openers only when its extension is importable; a Nikon N-RAW (`.NEV`)
+    /// that was not would be read whole into memory and opened as plain bytes, bypassing every registered reader opener.
+    #[test]
+    fn nikon_nraw_is_importable_so_it_streams_through_the_reader_openers() {
+        for name in ["DSC_0275.NEV", "dsc_0275.nev", "/card/DCIM/100NCZ_9/DSC_0275.Nev"] {
+            assert!(is_importable(Path::new(name)), "{name}");
+        }
     }
 }
