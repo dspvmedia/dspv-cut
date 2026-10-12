@@ -1008,6 +1008,11 @@ pub(crate) fn parse_sample_entry(format: FourCc, payload: &[u8], handler: FourCc
             // 48 kHz stereo 24-bit audio read as 1 Hz, 3 channels).
             let _size_of_struct = c.u32()?;
             a.sample_rate = c.f64()?;
+            // A raw f64 from the file: NaN, infinite, zero, negative or beyond u32 would reach `as u32` casts and rate-ratio
+            // divisions in the audio path, so only a positive rate that a u32 holds is a valid version 2 entry.
+            if !(a.sample_rate > 0.0 && a.sample_rate <= f64::from(u32::MAX)) {
+                return Err(Error::Invalid("sound description version 2 sample rate".into()));
+            }
             a.channels = c.u32()?;
             // The version 0 layout caps channels at 16 bits; hold version 2 to the same ceiling so a corrupt or hostile entry
             // cannot make later stages allocate one buffer per billion channels or overflow a frame-size multiply.
@@ -1783,6 +1788,19 @@ mod tests {
         let CodecConfig::Pcm(p) = e.codec else { panic!("expected PCM") };
         assert_eq!(p.bytes_per_frame(), 8192 * 65_535);
         assert_eq!(PcmConfig { bits: u16::MAX, channels: u32::MAX, ..Default::default() }.bytes_per_frame(), u32::MAX);
+    }
+
+    #[test]
+    fn sound_description_v2_with_an_unusable_sample_rate_is_rejected() {
+        // the sample rate is the big-endian f64 at offset 32
+        for rate in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, -48000.0, 1e12] {
+            let mut b = NIKON_LPCM_V2;
+            b[32..40].copy_from_slice(&rate.to_be_bytes());
+            assert!(parse_sample_entry(FourCc(*b"lpcm"), &b, FourCc(*b"soun"), false).is_err(), "rate {rate}");
+        }
+        let mut b = NIKON_LPCM_V2;
+        b[32..40].copy_from_slice(&192000f64.to_be_bytes());
+        assert!(parse_sample_entry(FourCc(*b"lpcm"), &b, FourCc(*b"soun"), false).is_ok());
     }
 
     #[test]
