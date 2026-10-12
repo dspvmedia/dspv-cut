@@ -626,13 +626,15 @@ impl GpuCompositor {
         let footprint = (1.0 / sx.min(sy).max(1e-6)) as f32;
         let taps = if footprint > 1.25 { footprint.ceil().min(4.0) } else { 1.0 };
         let _ = Matrix::Bt709;
-        // colour management (q0..q5), stage by stage as `InputTransform::apply`
-        let q = src.input.map_or([0.0; 24], |p| {
+        // colour management (q0..q5, then q6 and the log knots), stage by stage as `InputTransform::apply`
+        let mut q = [0.0f32; UNIFORM_FLOATS - 28];
+        if let Some(p) = src.input {
             let curve = match p.curve {
                 filmcraft_color::GpuCurve::Sdr => 0.0,
                 filmcraft_color::GpuCurve::Linear => 1.0,
                 filmcraft_color::GpuCurve::Pq => 2.0,
                 filmcraft_color::GpuCurve::Hlg => 3.0,
+                filmcraft_color::GpuCurve::Log => 4.0,
             };
             let (hl, hk) = p.hlg.unwrap_or(([0.0; 3], 0.0));
             let mx = p.matrix.unwrap_or([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
@@ -640,7 +642,7 @@ impl GpuCompositor {
             let dl = p.desaturate.unwrap_or([0.0; 3]);
             let on = |b: bool| if b { 1.0 } else { 0.0 };
             #[rustfmt::skip]
-            let q = [
+            let head = [
                 1.0, curve, hk, filmcraft_color::REFERENCE_WHITE_NITS as f32,
                 hl[0], hl[1], hl[2], on(p.matrix.is_some()),
                 mx[0][0], mx[0][1], mx[0][2], on(p.tone.is_some()),
@@ -648,8 +650,15 @@ impl GpuCompositor {
                 mx[2][0], mx[2][1], mx[2][2], dp,
                 dl[0], dl[1], dl[2], on(p.desaturate.is_some()),
             ];
-            q
-        });
+            q[..24].copy_from_slice(&head);
+            // q6: the log curve's signal range and the gamut compression switch; then the knots
+            if let Some(log) = p.log {
+                q[24] = log.lo;
+                q[25] = log.hi;
+                q[28..28 + filmcraft_color::GPU_LOG_KNOTS].copy_from_slice(&log.knots);
+            }
+            q[26] = on(p.compress);
+        }
         let base = [
             m.a as f32,
             m.b as f32,
@@ -1171,8 +1180,9 @@ struct SrcInfo {
     input: Option<filmcraft_color::GpuInputParams>,
 }
 
-/// Floats in a layer's uniform block (`U` in `composite.wgsl`: 13 vec4).
-const UNIFORM_FLOATS: usize = 52;
+/// Floats in a layer's uniform block (`U` in `composite.wgsl`): 14 vec4 (geometry, source, colour management, the log
+/// curve's range) and then the log curve's 513 knots padded to 129 vec4.
+const UNIFORM_FLOATS: usize = 28 + 28 + 516;
 
 /// Poll a future once: wgpu's native error scopes resolve immediately. `None` if it is still
 /// pending (then the caller assumes the worst).

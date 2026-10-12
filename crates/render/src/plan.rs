@@ -412,9 +412,9 @@ fn push_item(
         let time = crate::video_source_time(item, t, src.info().frame_rate());
         let Ok(frame) = src.video_frame(FrameRequest { time, scale: want }) else { return };
         let cs = crate::colorman::source_space(project, item.item, &frame);
-        // HDR and wide-gamut media on a Rec. 709 sequence is converted on the GPU too (#965); log
-        // media and other pipelines are converted on the CPU (below), and so are blended
-        // in-between frames (Frame Blending / Optical Flow on speed-changed clips)
+        // HDR, wide-gamut and log media on a Rec. 709 sequence is converted on the GPU too (#965);
+        // other pipelines are converted on the CPU (below), and so are blended in-between frames
+        // (Frame Blending / Optical Flow on speed-changed clips)
         let pipe = &seq.settings.color;
         let input = if crate::colorman::needs_management(pipe, cs, &frame) { crate::colorman::gpu_input(project, item.item, pipe, cs, &frame) } else { None };
         let plain =

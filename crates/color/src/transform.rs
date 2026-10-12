@@ -261,25 +261,25 @@ impl InputTransform {
     }
 
     /// The transform as plain numbers for a shader, which evaluates the curve and the BT.2390
-    /// EETF directly instead of sampling the tables. `None` for what a shader does not do: log
-    /// curves and the camera-gamut compression.
+    /// EETF directly instead of sampling the tables, except for log curves, which it reads from
+    /// knots sampled out of the decode table ([`GpuLog`]); the camera-gamut compression is run
+    /// in the shader too. `None` only for a log curve whose table is unusable.
     pub fn gpu_params(&self) -> Option<GpuInputParams> {
-        let curve = match self.source.curve() {
-            Curve::Sdr | Curve::Srgb => GpuCurve::Sdr,
-            Curve::Linear => GpuCurve::Linear,
-            Curve::Pq => GpuCurve::Pq,
-            Curve::Hlg => GpuCurve::Hlg,
-            Curve::Log(_) => return None,
+        let (curve, log) = match self.source.curve() {
+            Curve::Sdr | Curve::Srgb => (GpuCurve::Sdr, None),
+            Curve::Linear => (GpuCurve::Linear, None),
+            Curve::Pq => (GpuCurve::Pq, None),
+            Curve::Hlg => (GpuCurve::Hlg, None),
+            Curve::Log(_) => (GpuCurve::Log, Some(GpuLog::sample(&self.table)?)),
         };
-        if self.compress {
-            return None;
-        }
         Some(GpuInputParams {
             curve,
             hlg: self.hlg,
             matrix: (!self.identity_matrix).then_some(self.matrix),
             tone: self.tone.as_ref().map(|t| (t.src_peak_nits as f32, t.dst_peak_nits as f32)),
+            compress: self.compress,
             desaturate: self.desaturate,
+            log,
         })
     }
 }
@@ -292,6 +292,35 @@ pub enum GpuCurve {
     Linear,
     Pq,
     Hlg,
+    /// A log curve (S-Log3, V-Log, LogC, N-Log, Log3G10, ...): the shader reads [`GpuInputParams::log`].
+    Log,
+}
+
+/// Knots in [`GpuLog`]: 512 intervals. Linear interpolation between them follows the exponential part of a log curve to better
+/// than 1e-4 of the value, well below the precision of a half-float plane.
+pub const GPU_LOG_KNOTS: usize = 513;
+
+/// A log curve's decode table sampled at [`GPU_LOG_KNOTS`] evenly spaced signal values from `lo` to `hi`, for a shader to
+/// interpolate (the signal is clamped to `lo..=hi`, as the CPU's [`DecodeTable::lookup`] does).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GpuLog {
+    pub lo: f32,
+    pub hi: f32,
+    pub knots: [f32; GPU_LOG_KNOTS],
+}
+
+impl GpuLog {
+    /// Sample `table`; `None` for a table too short or with an empty range to interpolate.
+    pub fn sample(table: &DecodeTable) -> Option<GpuLog> {
+        if table.values.len() < 2 || table.lo.is_nan() || table.hi.is_nan() || table.hi <= table.lo {
+            return None;
+        }
+        let mut knots = [0.0f32; GPU_LOG_KNOTS];
+        for (i, k) in knots.iter_mut().enumerate() {
+            *k = table.lookup(table.lo + (table.hi - table.lo) * i as f32 / (GPU_LOG_KNOTS - 1) as f32);
+        }
+        Some(GpuLog { lo: table.lo, hi: table.hi, knots })
+    }
 }
 
 /// [`InputTransform`] for a shader ([`InputTransform::gpu_params`]), stage by stage as
@@ -305,8 +334,12 @@ pub struct GpuInputParams {
     pub matrix: Option<[[f32; 3]; 3]>,
     /// BT.2390 tone mapping (source peak, target peak) in cd/m², on max(R,G,B) as a ratio.
     pub tone: Option<(f32, f32)>,
+    /// Camera-gamut compression ([`gamut_compress`]), after the matrix and tone mapping.
+    pub compress: bool,
     /// Luma weights to desaturate into the working gamut with ([`desaturate_into_gamut`]).
     pub desaturate: Option<[f32; 3]>,
+    /// The curve for [`GpuCurve::Log`].
+    pub log: Option<GpuLog>,
 }
 
 /// Whether gamut `a` lies inside gamut `b` (so no compression is needed going a → b).
@@ -479,6 +512,60 @@ mod tests {
         assert!((dark[0] - 0.05).abs() < 1e-3);
     }
 
+    /// What the shader does with the knots: clamp to `lo..=hi`, then interpolate linearly between neighbours.
+    fn interpolate_knots(g: &GpuLog, v: f32) -> f32 {
+        let n = (GPU_LOG_KNOTS - 1) as f32;
+        let p = ((v - g.lo) / (g.hi - g.lo)).clamp(0.0, 1.0) * n;
+        let i = (p.floor() as usize).min(GPU_LOG_KNOTS - 2);
+        g.knots[i] + (g.knots[i + 1] - g.knots[i]) * (p - i as f32)
+    }
+
+    #[test]
+    fn gpu_log_knots_follow_the_cpu_decode_table_for_every_log_curve() {
+        use crate::{ColorPipeline, ColorSpace, Range};
+        let mut checked = 0;
+        for cs in ColorSpace::ALL.into_iter().filter(|c| c.is_log()) {
+            let t = InputTransform::new(cs, Range::Full, &ColorPipeline::REC709, None);
+            let p = t.gpu_params().expect("log curves have GPU parameters");
+            assert_eq!(p.curve, GpuCurve::Log);
+            let g = p.log.expect("with their knots");
+            assert_eq!((g.lo, g.hi), (t.table.lo, t.table.hi));
+            // Above black the knots follow the table to 1e-3 of the value (never of less than 0.05 of linear light; N-Log, which
+            // joins a cubic toe to a logarithm at a fixed signal, is the loosest at about 7e-4, a twelfth of an 8-bit code once
+            // displayed; the smooth curves are within 1.5e-4). Below black
+            // (negative linear light, which a display clips to zero) the curves are looser: Apple Log has a hard corner at its
+            // black level that falls inside one knot interval, costing about 1.6e-3 there, so that part has an absolute bound. The
+            // gamut matrix lets a negative component leak at most about a tenth of that into a positive one, under one display
+            // code; `log_input_gpu_matches_cpu` (in the gpu crate) measures the visible result and holds it to 3 codes.
+            let (mut worst_above, mut worst_below) = (0f32, 0f32);
+            for i in 0..=6000 {
+                let v = g.lo - 0.05 + (g.hi - g.lo + 0.1) * i as f32 / 6000.0; // a little beyond the range both ways
+                let (a, b) = (interpolate_knots(&g, v), t.table.lookup(v));
+                if b >= 0.0 {
+                    worst_above = worst_above.max((a - b).abs() / b.max(0.05));
+                } else {
+                    worst_below = worst_below.max((a - b).abs());
+                }
+            }
+            eprintln!("{}: knots differ from the table by up to {worst_above:.2e} above black, {worst_below:.2e} below", cs.id());
+            assert!(worst_above < 1e-3, "{}: knots differ from the table by {worst_above} (relative) above black", cs.id());
+            assert!(worst_below < 2.5e-3, "{}: knots differ from the table by {worst_below} below black", cs.id());
+            checked += 1;
+        }
+        assert!(checked >= 8, "{checked} log curves");
+    }
+
+    #[test]
+    fn non_log_curves_carry_no_knots_and_every_curve_has_gpu_parameters() {
+        use crate::{ColorPipeline, ColorSpace, Range};
+        for cs in ColorSpace::ALL {
+            let t = InputTransform::new(cs, Range::Full, &ColorPipeline::REC709, None);
+            let p = t.gpu_params().unwrap_or_else(|| panic!("{} has no GPU parameters", cs.id()));
+            assert_eq!(p.log.is_some(), cs.is_log(), "{}", cs.id());
+            assert_eq!(p.compress, t.compress, "{}", cs.id());
+        }
+    }
+
     #[test]
     fn gamut_compression() {
         // in-gamut colours are untouched
@@ -511,7 +598,7 @@ mod tests {
     }
 
     #[test]
-    fn gpu_params_cover_display_referred_media_only() {
+    fn gpu_params_cover_display_referred_and_log_media() {
         // HLG / PQ / BT.2020 into Rec. 709: every stage the shader has (#965)
         let p = |cs| InputTransform::new(cs, Range::Limited, &ColorPipeline::REC709, None).gpu_params();
         let hlg = p(ColorSpace::Rec2100Hlg).unwrap();
@@ -523,10 +610,14 @@ mod tests {
         let sdr2020 = p(ColorSpace::Rec2020).unwrap();
         assert_eq!((sdr2020.curve, sdr2020.tone), (GpuCurve::Sdr, None));
         assert!(sdr2020.matrix.is_some() && sdr2020.desaturate.is_some());
-        // log curves and camera-gamut compression stay on the CPU
+        // log curves run on the GPU too, from knots sampled out of the decode table, with the camera-gamut compression
         for cs in ColorSpace::ALL.into_iter().filter(|c| c.is_log()) {
-            assert_eq!(p(cs), None, "{cs:?}");
+            let g = p(cs).unwrap_or_else(|| panic!("{cs:?} has no GPU parameters"));
+            assert_eq!(g.curve, GpuCurve::Log, "{cs:?}");
+            assert!(g.log.is_some(), "{cs:?}");
         }
+        let nlog = p(ColorSpace::NLogBt2020).unwrap();
+        assert!(nlog.compress && nlog.matrix.is_some() && nlog.desaturate.is_none() && nlog.hlg.is_none(), "{nlog:?}");
     }
 
     #[test]

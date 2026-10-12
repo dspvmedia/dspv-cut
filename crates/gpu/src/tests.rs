@@ -552,3 +552,80 @@ fn hdr_input_gpu_matches_cpu() {
         assert!(apart > 20, "{name}: colour management changed nothing ({apart})");
     }
 }
+
+/// Log footage on a Rec. 709 sequence: the shader reads the log curve from sampled knots and runs the camera-gamut compression,
+/// and matches the CPU running the same `InputTransform`, for every log colour space, in 16-bit full range (what an N-RAW
+/// decode delivers) and 10-bit limited range (what a camera file carries).
+#[test]
+fn log_input_gpu_matches_cpu() {
+    use filmcraft_color::{ColorInfo, ColorPipeline, ColorSpace, InputTransform, Matrix, Primaries, Transfer};
+    let Some((dev, q)) = device() else {
+        eprintln!("no GPU adapter; skipping");
+        return;
+    };
+    let mut c = GpuCompositor::new(&dev, &q);
+    let (w, h) = (256u32, 6u32);
+    let mut tested = 0;
+    for cs in ColorSpace::ALL.into_iter().filter(|c| c.is_log()) {
+        for (bits, range) in [(16u32, Range::Full), (10, Range::Limited)] {
+            let top = (1u32 << bits) - 1;
+            // luma from below black to above white across the row; chroma: neutral, and pushed hard each way
+            let (lo, hi) = match range {
+                Range::Full => (0u32, top),
+                Range::Limited => (16 << (bits - 8), 250 << (bits - 8)),
+            };
+            let mid = 1u32 << (bits - 1);
+            let off = (top / 3) as i64;
+            let chroma = [
+                (mid, mid),
+                (mid, mid),
+                ((mid as i64 - off) as u32, (mid as i64 + off) as u32),
+                ((mid as i64 + off) as u32, (mid as i64 - off) as u32),
+                (mid, (mid as i64 + off) as u32),
+                (mid, (mid as i64 - off) as u32),
+            ];
+            let y: Vec<u16> = (0..h).flat_map(|_| (0..w).map(|x| (lo + x * (hi - lo) / (w - 1)) as u16)).collect();
+            let cb: Vec<u16> = (0..h).flat_map(|r| std::iter::repeat_n(chroma[r as usize].0 as u16, w as usize)).collect();
+            let cr: Vec<u16> = (0..h).flat_map(|r| std::iter::repeat_n(chroma[r as usize].1 as u16, w as usize)).collect();
+            let data = PixelData::Yuv16 { planes: [Arc::new(y), Arc::new(cb), Arc::new(cr)], chroma: Chroma::C444, bits, alpha: None };
+            let color = ColorInfo { matrix: Matrix::Bt2020Ncl, transfer: Transfer::Bt709, primaries: Primaries::Bt2020, range };
+            let frame = Arc::new(VideoFrame { width: w, height: h, data, color, par: (1, 1), pts: Default::default() });
+            let t = Arc::new(InputTransform::new(cs, range, &ColorPipeline::REC709, None));
+            let params = t.gpu_params().unwrap_or_else(|| panic!("{}: no GPU parameters", cs.id()));
+            assert_eq!(params.curve, filmcraft_color::GpuCurve::Log, "{}", cs.id());
+            let layer = PlanLayer { input: Some(t), ..PlanLayer::new(frame, Affine::IDENTITY, 1.0, Blend::Normal) };
+            let plan = FramePlan::Layers { width: w as usize, height: h as usize, layers: vec![layer] };
+            let cpu = execute_cpu(&plan).over_black_rgba8();
+            c.composite(&plan);
+            let (_, _, gpu) = c.read_output().expect("readback");
+            let (mut worst, mut at) = (0u8, 0usize);
+            for (i, (a, b)) in cpu.iter().zip(&gpu).enumerate() {
+                if i % 4 != 3 && a.abs_diff(*b) > worst {
+                    worst = a.abs_diff(*b);
+                    at = i / 4;
+                }
+            }
+            // and the stage does something: the same frame without it is far off
+            let plain_frame = match &plan {
+                FramePlan::Layers { layers, .. } => layers[0].frame.clone(),
+                _ => unreachable!(),
+            };
+            let plain =
+                FramePlan::Layers { width: w as usize, height: h as usize, layers: vec![PlanLayer::new(plain_frame, Affine::IDENTITY, 1.0, Blend::Normal)] };
+            c.composite(&plain);
+            let (_, _, unmanaged) = c.read_output().expect("readback");
+            let apart = gpu.iter().zip(&unmanaged).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
+            assert!(apart > 20, "{} {bits}-bit: the log transform changed nothing ({apart})", cs.id());
+            eprintln!("{} {bits}-bit {range:?}: max difference {worst} codes (pixel {} of row {})", cs.id(), at % w as usize, at / w as usize);
+            assert!(
+                worst <= 3,
+                "{} {bits}-bit {range:?}: GPU differs from the CPU by {worst} codes at pixel {} of row {}",
+                cs.id(),
+                at % w as usize,
+                at / w as usize
+            );
+            tested += 1;
+        }
+    }
+    assert!(tested >= 16, "only {tested} cases ran");
+}

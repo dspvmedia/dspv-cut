@@ -16,12 +16,15 @@ struct U {
     p2: vec4<f32>,   // kr kb code_scale footprint
     p3: vec4<f32>,   // blend mode, alpha-plane scale (0: none), effect-source integer decimation, unused
     // Colour management of HDR / wide-gamut Y'CbCr (`filmcraft_color::InputTransform`, #965):
-    q0: vec4<f32>,   // on, curve (0 sdr, 1 linear, 2 pq, 3 hlg), HLG OOTF scale (0: none), reference white cd/m²
+    q0: vec4<f32>,   // on, curve (0 sdr, 1 linear, 2 pq, 3 hlg, 4 log), HLG OOTF scale (0: none), reference white cd/m²
     q1: vec4<f32>,   // HLG OOTF luma weights, gamut matrix on
     q2: vec4<f32>,   // gamut matrix row 0, tone mapping on
     q3: vec4<f32>,   // gamut matrix row 1, tone-mapping source peak cd/m²
     q4: vec4<f32>,   // gamut matrix row 2, tone-mapping target peak cd/m²
     q5: vec4<f32>,   // desaturation luma weights, desaturation on
+    // Log curves (curve 4) and camera-gamut compression:
+    q6: vec4<f32>,   // log signal range lo, hi; gamut compression on; unused
+    tab: array<vec4<f32>, 129>, // the log curve's 513 knots: linear light at lo + (hi - lo) * i / 512
 };
 
 @group(0) @binding(0) var<uniform> u: U;
@@ -122,14 +125,47 @@ fn eetf(nits: f32, s: f32, d: f32) -> f32 {
     return pq1(e2 * smax) * 10000.0;
 }
 
+// A knot of the log curve table.
+fn knot(i: u32) -> f32 {
+    return u.tab[i >> 2u][i & 3u];
+}
+
+// A log curve: the decode table of the CPU path (`DecodeTable::lookup`), sampled at 513 knots and interpolated linearly.
+fn log_decode(v: vec3<f32>) -> vec3<f32> {
+    let lo = u.q6.x;
+    let span = max(u.q6.y - lo, 1e-6);
+    let p = clamp((v - vec3(lo)) / span, vec3(0.0), vec3(1.0)) * 512.0;
+    let i = min(floor(p), vec3(511.0));
+    let f = p - i;
+    let ix = u32(i.x); let iy = u32(i.y); let iz = u32(i.z);
+    let a = vec3(knot(ix), knot(iy), knot(iz));
+    let b = vec3(knot(ix + 1u), knot(iy + 1u), knot(iz + 1u));
+    return a + (b - a) * f;
+}
+
+// Camera-gamut compression (`filmcraft_color::gamut_compress`): colours near the edge of the working gamut are pulled in
+// smoothly, towards the achromatic axis. 0.2970402 is the constant `s` of that function, which does not depend on the colour.
+fn gamut_compress(c: vec3<f32>) -> vec3<f32> {
+    let th = 0.8; let pw = 1.2; let s = 0.2970402;
+    let ach = max(max(c.r, c.g), c.b);
+    if ach <= 1e-9 { return max(c, vec3(0.0)); }
+    let d = (vec3(ach) - c) / ach;
+    let x = max(d - vec3(th), vec3(0.0)) / s;
+    let dc = vec3(th) + s * x / pow(vec3(1.0) + pow(x, vec3(pw)), vec3(1.0 / pw));
+    return select(c, vec3(ach) - dc * ach, d >= vec3(th));
+}
+
 // Signal → working linear: `InputTransform::convert` (curve, HLG OOTF, gamut matrix, tone
 // mapping, desaturation into the working gamut). The CPU's decode tables clamp the signal to 0..1.
 fn managed(rgb: vec3<f32>) -> vec3<f32> {
-    let v = clamp(rgb, vec3(0.0), vec3(1.0));
     let curve = u32(u.q0.y);
+    var v = clamp(rgb, vec3(0.0), vec3(1.0));
+    // a log curve keeps its super-whites and sub-blacks: the table's own range
+    if curve == 4u { v = clamp(rgb, vec3(u.q6.x), vec3(u.q6.y)); }
     let white = u.q0.w;
     var c = v;
     if curve == 0u { c = srgb_to_linear(v); }
+    if curve == 4u { c = log_decode(v); }
     if curve == 2u { c = vec3(pq1(v.r), pq1(v.g), pq1(v.b)) * (10000.0 / white); }
     if curve == 3u { c = hlg_inv(v); }
     if u.q0.z > 0.0 {
@@ -154,6 +190,7 @@ fn managed(rgb: vec3<f32>) -> vec3<f32> {
             c = c * k;
         }
     }
+    if u.q6.z > 0.5 { c = gamut_compress(c); }
     if u.q5.w > 0.5 {
         let mn = min(min(c.r, c.g), c.b);
         if mn < 0.0 {
