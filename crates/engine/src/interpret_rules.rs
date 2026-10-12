@@ -206,6 +206,11 @@ fn set_rules(s: &mut Session, p: &Value) -> Result<Value> {
     let raw: Value = match (p.get("rules"), p.get("path").and_then(Value::as_str)) {
         (Some(r), None) => r.clone(),
         (None, Some(path)) => {
+            // size first: a huge (or endless) file must be refused before any of it is read into memory
+            let size = s.services.file_size(path).map_err(|e| bad(CMD, format!("cannot read {path}: {e}")))?;
+            if size > MAX_RULE_FILE as u64 {
+                return Err(bad(CMD, format!("{path} is larger than {MAX_RULE_FILE} bytes")));
+            }
             let bytes = s.services.read_file(path).map_err(|e| bad(CMD, format!("cannot read {path}: {e}")))?;
             if bytes.len() > MAX_RULE_FILE {
                 return Err(bad(CMD, format!("{path} is larger than {MAX_RULE_FILE} bytes")));
