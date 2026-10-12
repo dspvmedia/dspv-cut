@@ -82,13 +82,33 @@ pub enum HardwareEncoding {
 /// clip takes the same time (`docs/performance.md`). The GPU matches the CPU within the
 /// compositor's parity tolerance, not bit for bit, so an export's bytes can depend on the
 /// machine's GPU. Off = the CPU reference renderer, byte-reproducible everywhere; Off is the
-/// default (opt-in per export) until GPU export has been measured on Windows and macOS.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// default (opt-in per export) until GPU export has been measured on Windows and macOS, unless
+/// the program changes it for the whole process with [`set_default_gpu_rendering`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum GpuRendering {
     Auto,
-    #[default]
     Off,
+}
+
+static DEFAULT_GPU_RENDERING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// What export settings get when nothing says otherwise: the settings a new export starts with, and what a preset or saved
+/// settings without a `gpuRendering` value mean. Off unless [`set_default_gpu_rendering`] changed it.
+pub fn default_gpu_rendering() -> GpuRendering {
+    if DEFAULT_GPU_RENDERING.load(std::sync::atomic::Ordering::Relaxed) { GpuRendering::Auto } else { GpuRendering::Off }
+}
+
+/// Change [`default_gpu_rendering`] for the whole process: a build of the editor that wants GPU export on by default (and the
+/// export panel's checkbox, `gpuRendering` in a command and a preset still decide each export) calls this once at start-up.
+pub fn set_default_gpu_rendering(r: GpuRendering) {
+    DEFAULT_GPU_RENDERING.store(r == GpuRendering::Auto, std::sync::atomic::Ordering::Relaxed);
+}
+
+impl Default for GpuRendering {
+    fn default() -> Self {
+        default_gpu_rendering()
+    }
 }
 
 /// Bitrate encoding of bitrate-driven codecs (H.264).

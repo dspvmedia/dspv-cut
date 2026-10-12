@@ -575,7 +575,7 @@ impl Default for ExportSettings {
             bitrate_mode: BitrateMode::default(),
             crf: DEFAULT_CRF,
             hardware_encoding: HardwareEncoding::default(),
-            gpu_rendering: GpuRendering::Off,
+            gpu_rendering: GpuRendering::default(),
             max_bitrate_kbps: None,
             adaptive_bitrate: None,
             keyframe_distance: None,
