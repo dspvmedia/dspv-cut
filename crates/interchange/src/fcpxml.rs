@@ -963,6 +963,46 @@ impl Exp<'_, '_> {
                 close: "gap".into(),
             };
         }
+        // A title or adjustment layer has no FCPXML equivalent here. It used to be written as an `asset-clip` with `ref=""`, which
+        // is not valid FCPXML: DaVinci Resolve 21.1 aborts on it (`Assertion failed: (clipAsset)` in FcpXV3ToEditConverter) instead
+        // of skipping it. It is now a marker carrying its name: on the main storyline inside a gap, on a connected lane on the
+        // clip it is attached to.
+        if let Some(clip) = crate::common::uncarried_clip(self.p, it, rate) {
+            let what = if matches!(self.p.item(base).map(|i| &i.kind), Some(ItemKind::AdjustmentLayer { .. })) { "Adjustment layer" } else { "Title" };
+            let marker = format!(
+                "<marker start=\"{}\" duration=\"{}\" value=\"{}\"/>",
+                fmt_time(offset, rate),
+                fmt_time(rate.frame_duration(), rate),
+                crate::xml::escape(&format!("{what}: {}", it.name))
+            );
+            if lane.is_some() {
+                self.report.warn(format!(
+                    "{clip} is not supported in FCPXML: it is written as a marker on the clip it is connected to and is not read back as a clip"
+                ));
+                return El {
+                    start: it.start,
+                    end: it.end(),
+                    local: offset,
+                    xml_open: marker.trim_end_matches("/>").to_string(),
+                    children: vec![],
+                    close: "marker".into(),
+                };
+            }
+            self.report.warn(format!("{clip} is not supported in FCPXML: it is written as a gap with a marker and is not read back as a clip"));
+            return El {
+                start: it.start,
+                end: it.end(),
+                local: offset,
+                xml_open: format!(
+                    "<gap name=\"{name}\" offset=\"{}\" start=\"{}\" duration=\"{}\"",
+                    fmt_time(offset, rate),
+                    fmt_time(offset, rate),
+                    fmt_time(it.duration, rate)
+                ),
+                children: vec![marker],
+                close: "gap".into(),
+            };
+        }
         // Local timeline of the element: origin + source time (retimed clips use a timeMap).
         let (tag, r, origin) = if is_seq {
             let r = if self.building.contains(&base) {
@@ -974,13 +1014,7 @@ impl Exp<'_, '_> {
             let origin = self.p.sequence(base).map(|s| s.settings.frame_rate.tick_of(s.start_timecode)).unwrap_or(Tick::ZERO);
             ("ref-clip", r, origin)
         } else {
-            let r = match crate::common::uncarried_clip(self.p, it, rate) {
-                Some(clip) => {
-                    self.report.warn(format!("{clip} is not supported in FCPXML: it is written as a clip without media and is not read back on import"));
-                    String::new()
-                }
-                None => self.asset(base, rate),
-            };
+            let r = self.asset(base, rate);
             let m = item_media(self.p, base);
             let mrate = m.and_then(|m| m.info.video.as_ref().map(|v| v.frame_rate)).unwrap_or(rate);
             let st = m.and_then(|m| m.info.start_timecode).map(|f| mrate.tick_of(f)).unwrap_or(Tick::ZERO);

@@ -109,6 +109,20 @@ fn the_reports_match_what_an_import_gives_back() {
     }
 }
 
+/// DaVinci Resolve 21.1 aborts (`Assertion failed: (clipAsset)`, FcpXV3ToEditConverter.cpp) on an `asset-clip` whose `ref` is empty,
+/// which is how a title used to be written. Neither a title (connected lane) nor an adjustment layer (main storyline) may produce
+/// one; each is a marker carrying its name, so the position and the words are not lost.
+#[test]
+fn fcpxml_writes_no_clip_with_an_empty_asset_reference() {
+    let (p, s) = project_with_a_title();
+    let (bytes, _) = export_report(&p, s, Format::Fcpxml);
+    let text = String::from_utf8(bytes).unwrap();
+    assert!(!text.contains("ref=\"\""), "an empty ref is invalid FCPXML:\n{text}");
+    assert!(text.contains("value=\"Title: Opening"), "the title is kept as a marker:\n{text}");
+    assert!(text.contains("value=\"Adjustment layer: Grade\""), "the layer is kept as a marker:\n{text}");
+    assert!(text.matches("<asset-clip").count() == 1, "only the real media clip is an asset-clip:\n{text}");
+}
+
 /// The FCP7 XML importer dropped a clip item whose `<file>` reference has no definition (which is
 /// how the export writes a title) without a word: the import report names it.
 #[test]
