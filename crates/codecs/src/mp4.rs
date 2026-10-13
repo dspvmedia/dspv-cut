@@ -191,6 +191,16 @@ fn rtmd_fields(sample: &[u8], rate: FrameRate) -> Option<(i64, i64, i64, i64, bo
     Some((h, m, s, frames, drop))
 }
 
+/// A `tmcd` counter in video frames. The counter ticks at the track's nominal frame rate; video at a multiple of it (59.94p against
+/// a 30 count) has that many frames per tick. A video rate that is not a whole multiple, or an unknown rate, leaves it unchanged.
+fn timecode_counter_in_video_frames(counter: u32, tc_fps: u8, video_fps: Option<f64>) -> i64 {
+    let counter = i64::from(counter);
+    let (Some(v), true) = (video_fps, tc_fps > 0) else { return counter };
+    let video_nominal = v.round() as i64;
+    let tc = i64::from(tc_fps);
+    if video_nominal > tc && video_nominal % tc == 0 { counter.saturating_mul(video_nominal / tc) } else { counter }
+}
+
 /// Start timecode from a Sony `rtmd` track as a frame count at `rate` (issue #460), used when the
 /// file has no `tmcd` track. `None` if there is no `rtmd` track or it has no usable first sample.
 /// Only the fixed-size header is read (a damaged `stsz` size can't drive a huge allocation).
@@ -311,8 +321,13 @@ impl Mp4Source {
         let (atracks, audio_streams): (Vec<usize>, Vec<AudioStreamInfo>) =
             atracks.into_iter().filter_map(|i| Some((i, audio_stream_info(file.tracks.get(i)?, &bytes)?))).unzip();
         let duration = vtrack.or(atracks.first().copied()).and_then(|i| file.tracks.get(i)).map(|t| presentation_duration(&file, t)).unwrap_or_default();
+        // `tmcd` counts timecode frames at its nominal rate (`numberOfFrames`); for 50/60/120p video that is 25/30 per second (SMPTE 12
+        // high frame rate), so one count spans several video frames. Nikon writes 4161 at 30 for a 59.94p clip, which is 8322 video
+        // frames, the start DaVinci Resolve and ffprobe show (00:02:18;50); read as video frames it is half that, and Resolve then
+        // cannot match the file to an exported EDL, XML or FCPXML.
+        let video_fps = video.as_ref().map(|v| v.frame_rate.as_f64());
         let start_timecode = file.tracks.iter().find_map(|t| match t.codec() {
-            Some(CodecConfig::Timecode(tc)) => tc.start_frame.map(|f| f as i64),
+            Some(CodecConfig::Timecode(tc)) => tc.start_frame.map(|f| timecode_counter_in_video_frames(f, tc.frames_per_second, video_fps)),
             _ => None,
         });
         // Sony XAVC files with no `tmcd` track carry the start timecode in an `rtmd` metadata
@@ -724,6 +739,23 @@ pub fn reader_opener(name: &str, head: &[u8], reader: &filmcraft_media::SharedRe
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_high_frame_rate_timecode_counter_is_scaled_to_video_frames() {
+        // Nikon proxy: counter 4161 at a 30 count, 59.94p video: 8322 video frames (00:02:18;50 in Resolve and ffprobe)
+        assert_eq!(timecode_counter_in_video_frames(4161, 30, Some(59.94)), 8322);
+        assert_eq!(timecode_counter_in_video_frames(100, 30, Some(119.88)), 400);
+        assert_eq!(timecode_counter_in_video_frames(100, 25, Some(50.0)), 200);
+        // counted at the video rate, or the video is not a whole multiple of it: unchanged
+        assert_eq!(timecode_counter_in_video_frames(4161, 60, Some(59.94)), 4161);
+        assert_eq!(timecode_counter_in_video_frames(100, 30, Some(29.97)), 100);
+        assert_eq!(timecode_counter_in_video_frames(100, 24, Some(23.976)), 100);
+        assert_eq!(timecode_counter_in_video_frames(100, 24, Some(60.0)), 100, "60 is not a multiple of 24 counts");
+        // unknown rates leave the counter alone, and a huge counter cannot overflow
+        assert_eq!(timecode_counter_in_video_frames(100, 0, Some(59.94)), 100);
+        assert_eq!(timecode_counter_in_video_frames(100, 30, None), 100);
+        assert_eq!(timecode_counter_in_video_frames(u32::MAX, 30, Some(119.88)), i64::from(u32::MAX) * 4);
+    }
     use super::*;
     use filmcraft_isobmff::{Brand, FourCc, Mp4Writer, SampleEntry, TrackConfig, WriteSample, WriterOptions};
     use filmcraft_media::FrameRequest;
