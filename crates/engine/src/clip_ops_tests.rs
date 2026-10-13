@@ -329,6 +329,33 @@ fn make_and_edit_subclips() {
     assert_eq!((parent, range.start, range.end()), (tl.item, tl.source_in, tl.source_out()));
 }
 
+/// A subclip of footage larger than 1080p edits in centred on its own picture: its anchor is the centre of the parent's frame, as
+/// the whole clip's is (it was the centre of a 1920x1080 frame, which shifted the picture right and down).
+#[test]
+fn a_subclip_of_large_footage_is_anchored_at_its_own_centre() {
+    let mut s = demo();
+    let ocean = item_named(&s, "Ocean_Sunset.mp4");
+    {
+        let v = std::sync::Arc::make_mut(&mut s.project).item_mut(ocean).unwrap().as_media_mut().unwrap().info.video.as_mut().unwrap();
+        (v.width, v.height) = (4128, 2322);
+    }
+    let r24 = filmcraft_time::FrameRate::FPS_23_976;
+    let r = s.execute("clip.makeSubclip", json!({"item": ocean.0, "startFrame": 24, "endFrame": 72})).unwrap();
+    let sub = ItemId(r["item"].as_u64().unwrap());
+    let anchor_of = |s: &Session, c: u64| {
+        let v = clip(s, c).effect("motion").unwrap().param("anchor").unwrap().value.as_vec2().unwrap();
+        (v.x, v.y)
+    };
+    for (what, item) in [("the whole clip", ocean), ("the subclip", sub)] {
+        s.execute("source.open", json!({"item": item.0})).unwrap();
+        s.execute("playhead.set", json!({"frame": 0})).unwrap();
+        let r = s.execute("source.overwrite", json!({})).unwrap();
+        let c = r["clips"][0].as_u64().unwrap();
+        assert_eq!(anchor_of(&s, c), (2064.0, 1161.0), "{what}");
+    }
+    let _ = r24;
+}
+
 #[test]
 fn modify_audio_channels_and_breakout_to_mono() {
     let mut s = demo();

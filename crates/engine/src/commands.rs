@@ -955,6 +955,9 @@ pub(crate) fn place_item(
         ItemKind::Media(m) => m.info.video.as_ref().map(|v| (v.width, v.height)),
         ItemKind::Sequence(q) => Some((q.settings.width, q.settings.height)),
         ItemKind::AdjustmentLayer { width, height, .. } => Some((*width, *height)),
+        // a subclip has its parent's size; without this arm its anchor was centred in a 1920x1080 frame, which only looks right
+        // for 1080p footage (4K footage came out shifted right and down, showing its top-left corner)
+        ItemKind::Subclip { .. } => s.project.source_size(item),
         _ => None,
     }
     .unwrap_or((1920, 1080));
