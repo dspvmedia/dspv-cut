@@ -176,6 +176,17 @@ pub fn targets_source(app: &FilmcraftApp, params: &Value) -> bool {
 
 /// Execute a UI or engine command by id.
 pub fn invoke(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut params: Value) -> Result<Value, String> {
+    if app.hooks.host_commands.iter().any(|c| c.id == id) {
+        let Some(mut run) = app.hooks.run_host_command.take() else {
+            return Err("this command is not available".into());
+        };
+        let result = run(app, id);
+        app.hooks.run_host_command = Some(run);
+        if let Err(e) = &result {
+            app.ui.status = e.clone();
+        }
+        return result;
+    }
     if id == "edit.selectAll" && crate::panels::graphics::select_all_edited_text(app) {
         return Ok(Value::Null);
     }
@@ -661,6 +672,9 @@ pub const NATIVE_APP_MENU: [&str; 4] = ["Settings", "Hide FilmCraft", "Hide Othe
 
 pub fn menu_items(app: &FilmcraftApp) -> Vec<MenuItem> {
     let mut v = menu_items_for(&app.session);
+    for c in &app.hooks.host_commands {
+        v.push(MenuItem { id: c.id.clone(), label: c.label.clone(), path: c.menu.clone(), shortcut: None, enabled: true, checked: None });
+    }
     for it in &mut v {
         it.label = app.ui.language.tr(&it.label).to_string();
         match it.id.as_str() {

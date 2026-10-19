@@ -119,6 +119,15 @@ pub struct AudioDevices {
     pub output_channels: u16,
 }
 
+/// A command the host adds to the menus (see [`HostHooks::host_commands`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostCommand {
+    pub id: String,
+    pub label: String,
+    /// The menu and submenus it sits in, for example `["File"]`.
+    pub menu: Vec<String>,
+}
+
 /// Host hooks for native file dialogs etc.
 #[derive(Default)]
 pub struct HostHooks {
@@ -159,6 +168,17 @@ pub struct HostHooks {
     /// running while the dialog is open (the desktop app on Linux, #260); without it the
     /// synchronous pickers above are used.
     pub run_dialog: Option<Box<dyn FnMut(native_dialogs::FileDialog) -> Receiver<Vec<String>>>>,
+    /// Commands a build of the editor adds to the menus (id, label, menu path), for example a
+    /// publishing step of the product built on top. Ids must not clash with an engine or UI command.
+    /// They appear in the menu tree and the native menu, and run through [`Self::run_host_command`].
+    pub host_commands: Vec<HostCommand>,
+    /// Run one of [`Self::host_commands`] by id. The app is passed in so the command can read and
+    /// change the session (save, read the project path) and set the status line. An `Err` goes to
+    /// the status line like any other command's.
+    pub run_host_command: Option<Box<dyn FnMut(&mut FilmcraftApp, &str) -> Result<Value, String>>>,
+    /// Called once per frame, before the panels draw: where a host collects the answer of work it
+    /// started on another thread (the app is passed in to show it).
+    pub host_tick: Option<Box<dyn FnMut(&mut FilmcraftApp)>>,
     /// Open a URL in the system browser (Help menu links, About dialog, Discord button, Import
     /// screen). Without it, or when it fails, links go through `egui::Context::open_url`, which
     /// opens a new tab on the web (the native egui backend is built without its `links` feature).
@@ -1976,6 +1996,11 @@ impl eframe::App for FilmcraftApp {
     }
 
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // work the host started on another thread reports first, so the panels draw its answer
+        if let Some(mut tick) = self.hooks.host_tick.take() {
+            tick(self);
+            self.hooks.host_tick = Some(tick);
+        }
         // a native file dialog's answer first, so the panels draw what it chose (#260)
         self.poll_native_dialog(ctx);
         if !self.styled {

@@ -83,7 +83,14 @@ pub fn run() -> eframe::Result {
 /// Run the desktop app after `startup`, which runs once before anything else: a build of the editor with extra media formats
 /// registers its readers there, before any file is opened. `startup` must not panic and must not open the window.
 pub fn run_with(startup: impl FnOnce()) -> eframe::Result {
+    run_with_host(startup, |_| {})
+}
+
+/// [`run_with`], and `extend` may add to the host hooks (commands in the menus, work to collect each frame) before the menus are built.
+pub fn run_with_host(startup: impl FnOnce(), extend: impl Fn(&mut filmcraft_ui_egui::HostHooks) + Send + Sync + 'static) -> eframe::Result {
     startup();
+    // one start can try the window more than once (graphics fallbacks), and each try builds the app again
+    let extend: HostExtend = Arc::new(extend);
     // First, so the panic hook and every start-up record are logged (`logging`).
     let logger = logging::install();
     // lossy, so a value that is not Unicode is reported like any other bad port instead of ignored
@@ -142,7 +149,7 @@ pub fn run_with(startup: impl FnOnce()) -> eframe::Result {
         // Before eframe creates the wgpu instance (e.g. no OpenGL on Windows, see graphics.rs).
         graphics::apply(&mut options, graphics.mode(), backend_override);
         let app_created = Arc::new(AtomicBool::new(false));
-        let result = eframe::run_native("FilmCraft", options, app_creator(launch.clone(), graphics.clone(), Arc::clone(&app_created)));
+        let result = eframe::run_native("FilmCraft", options, app_creator(launch.clone(), graphics.clone(), Arc::clone(&app_created), Arc::clone(&extend)));
         let app_created = app_created.load(Ordering::Relaxed);
         match &result {
             // wgpu reported the failure (no adapter, device creation failed) before the app
@@ -193,7 +200,10 @@ fn native_options(agent: bool) -> eframe::NativeOptions {
 
 /// Creates the app once eframe has its window and graphics device; sets `created` when it runs,
 /// and confirms the graphics mode once two frames have painted.
-fn app_creator(launch: Launch, graphics: graphics::GraphicsStart, created: Arc<AtomicBool>) -> eframe::AppCreator<'static> {
+/// What the product built on the editor adds to the host hooks (see [`run_with_host`]).
+type HostExtend = Arc<dyn Fn(&mut filmcraft_ui_egui::HostHooks) + Send + Sync>;
+
+fn app_creator(launch: Launch, graphics: graphics::GraphicsStart, created: Arc<AtomicBool>, extend: HostExtend) -> eframe::AppCreator<'static> {
     let Launch { control_port, control_input_only, files, demo, startup_flag, recover, data_dir, graphics: _ } = launch;
     Box::new(move |cc| {
         created.store(true, Ordering::Relaxed);
@@ -254,6 +264,7 @@ fn app_creator(launch: Launch, graphics: graphics::GraphicsStart, created: Arc<A
             }
         }
         let mut app = FilmcraftApp::new(session);
+        extend(&mut app.hooks);
         app.graphics_notice = notice;
         if recover == Some(false) {
             app.dialog = None;

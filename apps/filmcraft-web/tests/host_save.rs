@@ -14,7 +14,16 @@ fn saved_projects_are_project_writes() {
 
 #[test]
 fn exports_captions_and_other_folders_are_not() {
-    for path in ["/exports/a.mp4", "/exports/Dune.fcproj", "/projects/", "/projects/.fcproj.txt", "/projects/clip.srt", "/opfs/recovery.fcproj", "projects/a.fcproj", "/recovered/x.fcproj"] {
+    for path in [
+        "/exports/a.mp4",
+        "/exports/Dune.fcproj",
+        "/projects/",
+        "/projects/.fcproj.txt",
+        "/projects/clip.srt",
+        "/opfs/recovery.fcproj",
+        "projects/a.fcproj",
+        "/recovered/x.fcproj",
+    ] {
         assert!(!is_project_write(path), "{path}");
     }
 }
