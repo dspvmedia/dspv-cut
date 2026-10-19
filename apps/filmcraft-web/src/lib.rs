@@ -22,6 +22,8 @@ pub mod api;
 pub mod audio;
 pub mod download_pacing;
 pub mod fs;
+pub mod host;
+pub mod host_save;
 pub mod import;
 pub mod opfs;
 pub mod recovery;
@@ -163,6 +165,10 @@ pub async fn start(canvas_id: String) -> Result<(), JsValue> {
                 let ctx = cc.egui_ctx.clone();
                 fs::set_on_data(move || ctx.request_repaint());
                 fs::set_on_write(|path, data| {
+                    // Inside the DSPV hub the page saves projects itself (see `host`); everything else downloads.
+                    if host::written(path, data) {
+                        return;
+                    }
                     if let Err(e) = fs::download(path, data) {
                         log::warn!("download {path}: {e:?}");
                     }

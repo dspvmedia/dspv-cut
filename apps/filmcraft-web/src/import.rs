@@ -261,8 +261,15 @@ pub fn install_hooks(app: &mut FilmcraftApp) {
         pick(&["fcproj"], false);
         None
     }));
-    // Saving writes the file in memory and offers it as a download (`fs::WebServices`).
-    app.hooks.pick_save = Some(Box::new(|name: &str| Some(format!("/projects/{name}"))));
+    // Saving writes the file in memory and offers it as a download (`fs::WebServices`), unless the
+    // page around the editor (the DSPV hub) takes over: it shows its own Save dialog and saves
+    // with the chosen path afterwards, so nothing is written now (see `host`).
+    app.hooks.pick_save = Some(Box::new(|name: &str| {
+        if crate::host::pick_save(name) {
+            return None;
+        }
+        Some(format!("/projects/{name}"))
+    }));
     app.hooks.pick_save_as = Some(Box::new(|_filter: &str, _exts: &[&str], name: &str| {
         let file = std::path::Path::new(name).file_name().map_or(name.into(), |n| n.to_string_lossy());
         Some(format!("/exports/{file}"))
