@@ -6,6 +6,8 @@
 //!     filmcraft.execute("file.saveAs", { path: "/projects/<name>.fcproj" }) */ }
 //! filmcraftHost.onProjectWrite = (path, bytes) => true   // true (or nothing): handled, no download
 //!                                                        // false: download it as usual
+//! filmcraftHost.runCommand = (id) => {}   // File ▸ Send to Review etc.: the commands the page added with
+//!                                          // filmcraft.setHostCommands([{id, label, menu: ["File"]}])
 //! ```
 //!
 //! Without them the editor saves by downloading, as the stock web app does. A host function that
@@ -56,4 +58,12 @@ pub fn written(path: &str, data: &[u8]) -> bool {
             false
         }
     }
+}
+
+/// Run one of the commands the page added to the menus: the page's `runCommand(id)`.
+pub fn run_command(id: &str) -> Result<(), String> {
+    let Some(f) = host_fn("runCommand") else { return Err("this command is not available".into()) };
+    f.call1(&host(), &JsValue::from_str(id)).map(|_| ()).map_err(|e| {
+        js_sys::Reflect::get(&e, &"message".into()).ok().and_then(|m| m.as_string()).or_else(|| e.as_string()).unwrap_or_else(|| "the command failed".into())
+    })
 }

@@ -26,3 +26,32 @@ pub enum WriteRoute {
 pub fn route_write(path: &str, host_listening: bool) -> WriteRoute {
     if host_listening && is_project_write(path) { WriteRoute::Host } else { WriteRoute::Download }
 }
+
+/// The menus a page may add commands to (the editor's own top-level menus).
+const MENUS: [&str; 9] = ["File", "Edit", "Clip", "Sequence", "Markers", "Graphics and Titles", "View", "Window", "Help"];
+const MAX_COMMANDS: usize = 8;
+
+/// A command the page asks to add to the menus: id, label, menu path.
+pub type PageCommand = (String, String, Vec<String>);
+
+/// Read the list a page passes to `filmcraft.setHostCommands`: `[{id, label, menu: ["File"]}]`. Entries that are malformed (no id or label, an unknown
+/// top-level menu, too long) are dropped, so a bad page cannot put junk in the menus; at most [`MAX_COMMANDS`] are kept.
+pub fn parse_host_commands(list: &serde_json::Value) -> Vec<PageCommand> {
+    let short = |v: Option<&serde_json::Value>| {
+        v.and_then(serde_json::Value::as_str).map(str::trim).filter(|s| !s.is_empty() && s.chars().count() <= 64).map(str::to_string)
+    };
+    let mut out = Vec::new();
+    for item in list.as_array().map(Vec::as_slice).unwrap_or_default() {
+        let (Some(id), Some(label)) = (short(item.get("id")), short(item.get("label"))) else { continue };
+        let menu: Vec<String> =
+            item.get("menu").and_then(serde_json::Value::as_array).map(|a| a.iter().filter_map(|v| short(Some(v))).collect()).unwrap_or_default();
+        if menu.first().is_none_or(|top| !MENUS.contains(&top.as_str())) || out.iter().any(|(existing, _, _): &PageCommand| *existing == id) {
+            continue;
+        }
+        out.push((id, label, menu));
+        if out.len() == MAX_COMMANDS {
+            break;
+        }
+    }
+    out
+}

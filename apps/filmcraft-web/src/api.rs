@@ -212,6 +212,20 @@ pub fn install() -> Result<(), JsValue> {
         })
         .into_js_value(),
     )?;
+    // The page around the editor adds commands to the editor's menus (File ▸ Send to Review in the DSPV hub); choosing one calls the page's `filmcraftHost.runCommand(id)`.
+    set_fn(
+        &obj,
+        "setHostCommands",
+        Closure::<dyn Fn(JsValue)>::new(|list: JsValue| {
+            let commands = crate::host_save::parse_host_commands(&from_js(&list));
+            crate::post(move |app, ctx| {
+                app.app.hooks.host_commands = commands.into_iter().map(|(id, label, menu)| filmcraft_ui_egui::HostCommand { id, label, menu }).collect();
+                app.app.hooks.run_host_command = Some(Box::new(|_app, id| crate::host::run_command(id).map(|()| Value::Null)));
+                ctx.request_repaint();
+            });
+        })
+        .into_js_value(),
+    )?;
     let w = web_sys::window().ok_or("no window")?;
     js_sys::Reflect::set(&w, &"filmcraft".into(), &obj)?;
     Ok(())
