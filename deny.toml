@@ -1,0 +1,25 @@
+# DSPV licence allow-list for dependencies (same list as the other Craft forks). Anything outside it fails CI; review each before adding.
+[graph]
+targets = [{ triple = "aarch64-apple-darwin" }]
+
+[licenses]
+confidence-threshold = 0.8
+unused-allowed-license = "allow"
+allow = [
+  "MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib",
+  "Unicode-3.0", "Unicode-DFS-2016", "CC0-1.0", "BSL-1.0", "0BSD", "OFL-1.1", "MPL-2.0", "Unlicense", "CDLA-Permissive-2.0",
+]
+
+exceptions = [
+  { allow = ["Ubuntu-font-1.0"], crate = "epaint_default_fonts" },
+]
+
+[bans]
+multiple-versions = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "warn"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# Reviewed 2026-10-15, per crate only (anything else using these licences still fails):
+#  - epaint_default_fonts bundles the Ubuntu font (Ubuntu Font Licence 1.0): embedding and use are allowed, we do not modify or rename the fonts.
