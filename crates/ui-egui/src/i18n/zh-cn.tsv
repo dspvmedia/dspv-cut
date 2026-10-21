@@ -3592,3 +3592,6 @@
 	Open a sequence to search its graphics	打开序列以搜索其中的图形
 	No text graphics in this sequence. Add text with the Type tool.	此序列中没有文本图形。请用文字工具添加文本。
 	No matching text.	没有匹配的文本。
+	Reloaded: this project was saved somewhere else	已重新载入：此项目已在其他位置保存
+	This project was saved somewhere else. Your unsaved edits are kept here; saving replaces the other version (File ▸ Revert loads it)	此项目已在其他位置保存。你未保存的编辑仍保留在这里；保存会替换另一个版本（文件 ▸ 还原 可载入它）
+	Reload If Changed on Disk	如磁盘上已更改则重新载入

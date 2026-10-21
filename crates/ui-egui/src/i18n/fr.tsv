@@ -3584,3 +3584,6 @@
 	Open a sequence to search its graphics	Ouvrez une séquence pour rechercher dans ses graphiques
 	No text graphics in this sequence. Add text with the Type tool.	Aucun graphique avec du texte dans cette séquence. Ajoutez du texte avec l'outil Texte.
 	No matching text.	Aucun texte ne correspond.
+	Reloaded: this project was saved somewhere else	Rechargé : ce projet a été enregistré ailleurs
+	This project was saved somewhere else. Your unsaved edits are kept here; saving replaces the other version (File ▸ Revert loads it)	Ce projet a été enregistré ailleurs. Vos modifications non enregistrées sont conservées ici ; enregistrer remplace l'autre version (Fichier ▸ Revenir à la version enregistrée la charge)
+	Reload If Changed on Disk	Recharger si modifié sur le disque

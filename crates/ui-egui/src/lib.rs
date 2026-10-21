@@ -1800,6 +1800,41 @@ impl FilmcraftApp {
         ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
     }
 
+    /// The project saved somewhere else while it is open here (another Mac through a sync folder, a browser edit written back by the DSPV hub):
+    /// checked when the window comes to the front and every few seconds ([`filmcraft_engine::Session::project_changed_on_disk`]). With nothing
+    /// unsaved the other version is loaded (File ▸ Revert) and the status line says so; with unsaved edits they are kept, and the status line
+    /// says once that saving replaces the other version, so neither is lost without being told.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn tick_project_disk_watch(&mut self, ctx: &egui::Context) {
+        const EVERY: f64 = 3.0;
+        if self.session.path.is_none() {
+            return;
+        }
+        let (last_key, focus_key, warned_key) = (egui::Id::new("diskWatch.last"), egui::Id::new("diskWatch.focused"), egui::Id::new("diskWatch.warned"));
+        let now = ctx.input(|i| i.time);
+        let focused = ctx.input(|i| i.focused);
+        let was_focused: bool = ctx.data(|d| d.get_temp(focus_key)).unwrap_or(focused);
+        ctx.data_mut(|d| d.insert_temp(focus_key, focused));
+        let last: f64 = ctx.data(|d| d.get_temp(last_key)).unwrap_or(f64::NEG_INFINITY);
+        if now - last >= EVERY || (focused && !was_focused) {
+            ctx.data_mut(|d| d.insert_temp(last_key, now));
+            let warned: bool = ctx.data(|d| d.get_temp(warned_key)).unwrap_or(false);
+            if !self.session.project_changed_on_disk() {
+                ctx.data_mut(|d| d.insert_temp(warned_key, false));
+            } else if !self.session.is_dirty() {
+                match self.session.execute("file.revert", serde_json::json!({})) {
+                    Ok(_) => self.ui.status = tl!("Reloaded: this project was saved somewhere else").into(),
+                    Err(e) => self.ui.status = e.to_string(),
+                }
+                ctx.data_mut(|d| d.insert_temp(warned_key, false));
+            } else if !warned {
+                self.ui.status = tl!("This project was saved somewhere else. Your unsaved edits are kept here; saving replaces the other version (File ▸ Revert loads it)").into();
+                ctx.data_mut(|d| d.insert_temp(warned_key, true));
+            }
+        }
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(EVERY));
+    }
+
     fn frame(&mut self, ui: &mut egui::Ui) {
         i18n::set_current(self.ui.language);
         if std::mem::take(&mut self.panic_next_frame) {
@@ -1819,6 +1854,8 @@ impl FilmcraftApp {
         self.apply_prefs(&ctx);
         #[cfg(not(target_arch = "wasm32"))]
         self.tick_media_refresh(&ctx);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.tick_project_disk_watch(&ctx);
         for ev in self.session.drain_events() {
             match ev {
                 filmcraft_engine::Event::OpenSequence(_) => {
