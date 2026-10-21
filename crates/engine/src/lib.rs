@@ -403,6 +403,9 @@ pub struct Session {
     /// Schema version of the file at `path` as found on disk (older = upgraded on load; the first
     /// save over it keeps a backup of the original).
     pub loaded_schema: u32,
+    /// A hash of the project file as this session last read or wrote it: `file.reloadIfChangedOnDisk` compares the file with it, so a save made
+    /// somewhere else (another Mac through a sync folder, the hub) is noticed instead of being overwritten by an old copy kept open here.
+    pub disk_hash: Option<u64>,
     /// Render preview files + render-bar segments (shared with the frontend's frame workers).
     pub previews: Arc<previews::PreviewStore>,
     /// Audio Track Mixer automation pass in progress.
@@ -522,6 +525,7 @@ impl Session {
             prefs_path: None,
             persistence: None,
             loaded_schema: filmcraft_format::SCHEMA_VERSION,
+            disk_hash: None,
             previews: Arc::new(previews::PreviewStore::temp()),
             mixrec: Default::default(),
             mcrec: Default::default(),

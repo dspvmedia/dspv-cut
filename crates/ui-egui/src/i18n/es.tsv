@@ -3618,3 +3618,6 @@
 	Open a sequence to search its graphics	Abre una secuencia para buscar en sus gráficos
 	No text graphics in this sequence. Add text with the Type tool.	Esta secuencia no tiene gráficos con texto. Añade texto con la herramienta Texto.
 	No matching text.	Ningún texto coincide.
+	Reloaded: this project was saved somewhere else	Recargado: este proyecto se guardó en otro lugar
+	This project was saved somewhere else. Your unsaved edits are kept here; saving replaces the other version (File ▸ Revert loads it)	Este proyecto se guardó en otro lugar. Tus cambios sin guardar se conservan aquí; al guardar se reemplaza la otra versión (Archivo ▸ Revertir la carga)
+	Reload If Changed on Disk	Recargar si cambió en el disco

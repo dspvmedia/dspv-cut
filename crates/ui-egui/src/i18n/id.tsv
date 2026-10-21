@@ -3582,3 +3582,6 @@
 	Open a sequence to search its graphics	Buka sekuens untuk mencari di grafisnya
 	No text graphics in this sequence. Add text with the Type tool.	Tidak ada grafis teks di sekuens ini. Tambahkan teks dengan alat Teks.
 	No matching text.	Tidak ada teks yang cocok.
+	Reloaded: this project was saved somewhere else	Dimuat ulang: proyek ini disimpan di tempat lain
+	This project was saved somewhere else. Your unsaved edits are kept here; saving replaces the other version (File ▸ Revert loads it)	Proyek ini disimpan di tempat lain. Suntingan yang belum disimpan tetap di sini; menyimpan akan mengganti versi lainnya (Berkas ▸ Kembalikan memuatnya)
+	Reload If Changed on Disk	Muat ulang jika berubah di disk

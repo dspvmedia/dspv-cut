@@ -115,3 +115,61 @@ fn open_demo_project_clears_saved_path_so_save_does_not_overwrite() {
     );
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// Another save of the same file (a second Mac through a sync folder, the hub writing back a browser edit), made while this session had it open.
+fn save_elsewhere(path: &str) {
+    let mut other = Session::default();
+    other.execute("file.open", json!({"path": path})).unwrap();
+    other.execute("sequence.addEdit", json!({"seconds": 2.0})).unwrap();
+    other.execute("file.save", json!({})).unwrap();
+}
+
+#[test]
+fn a_project_saved_elsewhere_is_reloaded_when_nothing_here_is_unsaved() {
+    let d = temp_dir("disk-reload");
+    let path = d.join("p.fcproj").to_string_lossy().to_string();
+    let mut s = demo();
+    s.execute("file.saveAs", json!({"path": path})).unwrap();
+    assert_eq!(s.execute("file.reloadIfChangedOnDisk", json!({})).unwrap()["changed"], false, "our own save is not a change");
+    save_elsewhere(&path);
+    let r = s.execute("file.reloadIfChangedOnDisk", json!({})).unwrap();
+    assert_eq!((r["changed"].clone(), r["reloaded"].clone()), (json!(true), json!(true)));
+    let mut fresh = Session::default();
+    fresh.execute("file.open", json!({"path": path})).unwrap();
+    assert_eq!(*s.project, *fresh.project, "the session now holds the other save");
+    assert!(!s.is_dirty());
+    assert_eq!(s.reload_if_changed_on_disk().unwrap()["changed"], false, "once reloaded, the file is known again");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn unsaved_edits_are_never_replaced_by_a_save_made_elsewhere() {
+    let d = temp_dir("disk-dirty");
+    let path = d.join("p.fcproj").to_string_lossy().to_string();
+    let mut s = demo();
+    s.execute("file.saveAs", json!({"path": path})).unwrap();
+    s.execute("sequence.addEdit", json!({"seconds": 1.0})).unwrap();
+    let mine = (*s.project).clone();
+    save_elsewhere(&path);
+    for _ in 0..2 {
+        let r = s.reload_if_changed_on_disk().unwrap();
+        assert_eq!((r["changed"].clone(), r["reloaded"].clone(), r["dirty"].clone()), (json!(true), json!(false), json!(true)), "still reported until resolved");
+    }
+    assert_eq!(*s.project, mine, "the unsaved edit is still here");
+    // Revert takes the other save; after that the file is in step again.
+    s.execute("file.revert", json!({})).unwrap();
+    assert_eq!(s.reload_if_changed_on_disk().unwrap()["changed"], false);
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn nothing_to_compare_without_a_saved_file() {
+    let mut s = demo();
+    assert_eq!(s.reload_if_changed_on_disk().unwrap()["changed"], false);
+    let d = temp_dir("disk-gone");
+    let path = d.join("p.fcproj").to_string_lossy().to_string();
+    s.execute("file.saveAs", json!({"path": path})).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(s.reload_if_changed_on_disk().unwrap()["changed"], false, "a file that is briefly gone (being replaced) is not a change");
+    let _ = std::fs::remove_dir_all(&d);
+}

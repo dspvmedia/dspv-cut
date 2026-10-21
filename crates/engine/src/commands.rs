@@ -1536,16 +1536,8 @@ fn build() -> Vec<CommandSpec> {
             let path = str_p(p, "path").ok_or_else(|| bad("file.saveCopy", "need `path`"))?.to_string();
             write_project(s, &path, false)
         }),
-        cmd!("file.revert", "Revert", ["File"], None, "{}", has_saved_path, |s, _| {
-            let path = s.path.clone().ok_or_else(|| bad("file.revert", "project was never saved"))?;
-            let keep = s.state.active_sequence;
-            let r = open_project(s, &path)?;
-            if let Some(k) = keep.filter(|k| s.project.sequence(*k).is_some()) {
-                s.state.active_sequence = Some(k);
-                s.state.open_sequences = vec![k];
-            }
-            Ok(r)
-        }),
+        cmd!("file.revert", "Revert", ["File"], None, "{}", has_saved_path, |s, _| revert_project(s)),
+        cmd!("file.reloadIfChangedOnDisk", "Reload If Changed on Disk", [], None, "{}", always, |s, _| s.reload_if_changed_on_disk()),
         cmd!("file.open", "Open Project…", ["File"], Some("Cmd+O"), r#"{"path":str}"#, always, |s, p| {
             let path = str_p(p, "path").ok_or_else(|| bad("file.open", "need `path`"))?.to_string();
             open_project(s, &path)
@@ -4366,6 +4358,49 @@ fn name_project(p: &mut filmcraft_project::Project, name: String) {
     p.name = name;
 }
 
+/// Reload the saved project from its file, keeping the sequence that was in front when it is still there.
+fn revert_project(s: &mut Session) -> Result<Value> {
+    let path = s.path.clone().ok_or_else(|| bad("file.revert", "project was never saved"))?;
+    let keep = s.state.active_sequence;
+    let r = open_project(s, &path)?;
+    if let Some(k) = keep.filter(|k| s.project.sequence(*k).is_some()) {
+        s.state.active_sequence = Some(k);
+        s.state.open_sequences = vec![k];
+    }
+    Ok(r)
+}
+
+fn content_hash(bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut h);
+    h.finish()
+}
+
+impl Session {
+    /// The project file now differs from what this session last read or wrote. False with no saved file, and while the file is gone or
+    /// unreadable for a moment (a sync tool replacing it).
+    pub fn project_changed_on_disk(&self) -> bool {
+        let (Some(path), Some(known)) = (self.path.as_deref(), self.disk_hash) else { return false };
+        self.services.read_file(path).is_ok_and(|bytes| content_hash(&bytes) != known)
+    }
+
+    /// Has the project file been saved by something else since this session last read or wrote it? With no unsaved edits here, load that
+    /// version (`reloaded`); with unsaved edits, leave both alone and say so (`changed` and `dirty`), so nothing is lost either way. The app calls
+    /// this when its window comes to the front and every few seconds; it is also the `file.reloadIfChangedOnDisk` command.
+    pub fn reload_if_changed_on_disk(&mut self) -> Result<Value> {
+        if !self.project_changed_on_disk() {
+            return Ok(json!({"changed": false, "reloaded": false, "dirty": self.is_dirty()}));
+        }
+        let path = self.path.clone().unwrap_or_default();
+        if self.is_dirty() {
+            return Ok(json!({"changed": true, "reloaded": false, "dirty": true, "path": path}));
+        }
+        let r = revert_project(self)?;
+        Ok(json!({"changed": true, "reloaded": true, "dirty": false, "path": path, "open": r}))
+    }
+}
+
 fn write_project(s: &mut Session, path: &str, adopt: bool) -> Result<Value> {
     let t0 = web_time::Instant::now();
     // Save As renames the project after its new file (not an edit: no undo step, not dirty).
@@ -4390,6 +4425,7 @@ fn write_project(s: &mut Session, path: &str, adopt: bool) -> Result<Value> {
     }
     s.services.write_file(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     if adopt {
+        s.disk_hash = Some(content_hash(&bytes));
         s.path = Some(path.to_string());
         s.previews_follow_path();
         s.note_recent_project();
@@ -4437,6 +4473,7 @@ fn open_project(s: &mut Session, path: &str) -> Result<Value> {
     let loaded = filmcraft_format::decode(&bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let (from, migrated) = (loaded.schema_version, loaded.migrated());
     install_project(s, loaded.project, Some(path.to_string()), true);
+    s.disk_hash = Some(content_hash(&bytes));
     if let Some(view) = loaded.view.filter(|_| s.prefs.timeline.restore_open_sequences) {
         s.restore_project_view(view);
     }

@@ -3608,3 +3608,6 @@
 	Open a sequence to search its graphics	Apri una sequenza per cercare nelle sue grafiche
 	No text graphics in this sequence. Add text with the Type tool.	Nessuna grafica con testo in questa sequenza. Aggiungi testo con lo strumento Testo.
 	No matching text.	Nessun testo corrispondente.
+	Reloaded: this project was saved somewhere else	Ricaricato: questo progetto è stato salvato altrove
+	This project was saved somewhere else. Your unsaved edits are kept here; saving replaces the other version (File ▸ Revert loads it)	Questo progetto è stato salvato altrove. Le modifiche non salvate restano qui; salvare sostituisce l'altra versione (File ▸ Ripristina la carica)
+	Reload If Changed on Disk	Ricarica se modificato su disco

@@ -3617,3 +3617,6 @@
 	Open a sequence to search its graphics	シーケンスを開くとグラフィックスを検索できます
 	No text graphics in this sequence. Add text with the Type tool.	このシーケンスにはテキストのグラフィックスがありません。文字ツールでテキストを追加してください。
 	No matching text.	一致するテキストはありません。
+	Reloaded: this project was saved somewhere else	再読み込みしました: このプロジェクトは別の場所で保存されました
+	This project was saved somewhere else. Your unsaved edits are kept here; saving replaces the other version (File ▸ Revert loads it)	このプロジェクトは別の場所で保存されました。未保存の編集はここに残っています。保存するともう一方のバージョンが置き換えられます（ファイル ▸ 保存済みの状態に戻す で読み込めます）
+	Reload If Changed on Disk	ディスク上で変更されていたら再読み込み
