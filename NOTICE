@@ -3,9 +3,9 @@ Copyright (c) 2026 ArtCraft Team and the FilmCraft contributors.
 Licensed under the MIT License or the Apache License, Version 2.0, at your option
 (LICENSE-MIT, LICENSE-APACHE).
 
-The ArtCraft name, wordmark and logos in docs/brand/ are trademarks of the ArtCraft Team. They are
-not open source and are not covered by the license above; their terms are in
-docs/brand/LICENSE-brand.txt.
+The ArtCraft name, wordmark and logos are trademarks of the ArtCraft Team. They are not open source
+and are not covered by the license above. Upstream FilmCraft keeps them in docs/brand/ with their
+terms; this DSPV fork has removed them, as those terms require of a modified version.
 
 Third-party material
 
@@ -19,3 +19,15 @@ Builds made with craft-fonts (CRAFT_FONTS_DIR; all official releases) also embed
 https://github.com/storytold/craft-fonts/blob/main/ATTRIBUTION.md (BIZ UDPGothic, Shippori Mincho,
 BIZ UDMincho) — OFL-1.1. Their licence texts ship with the packages as OFL-<family>.txt.
 Public-domain film and NASA frames and CC0 music shown in README screenshots (docs/images/) — public domain / CC0-1.0. See ATTRIBUTION.md.
+
+
+DSPV Media modifications
+This copy is a fork maintained by DSPV Media (github.com/dspvmedia/dspv-cut). It is based on FilmCraft
+by the ArtCraft team and community. Our changes are on the dspv/* branches; `git log
+upstream-main..dspv/nlog-transform` lists them. The ArtCraft name, wordmark and logos are not used in
+this fork: the app shows a DSPV placeholder wordmark (assets/dspv/, see ATTRIBUTION.md).
+
+DSPV Media: further third-party notices (licence audit of 2026-10-22)
+
+symphonia (audio decoding) is used unmodified under the Mozilla Public License 2.0; source:
+https://github.com/pdeljanov/Symphonia
