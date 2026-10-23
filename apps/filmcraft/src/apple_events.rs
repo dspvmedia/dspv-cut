@@ -5,12 +5,12 @@
 
 use serde_json::{Value, json};
 
-/// Open an arriving project, then import any media into the current session. Media alone must
+/// Open an arriving project only when the session is clean, then import any media. Media alone must
 /// never create a project: the current one may contain unsaved work (or already be Untitled).
-pub fn arrival_commands(paths: &[String]) -> Vec<(&'static str, Value)> {
+pub fn arrival_commands(paths: &[String], dirty: bool) -> Vec<(&'static str, Value)> {
     let (project, media) = crate::args::project_and_media(paths);
     let mut commands = Vec::new();
-    if let Some(path) = project {
+    if !dirty && let Some(path) = project {
         commands.push(("file.open", json!({"path": path})));
     }
     if !media.is_empty() {
@@ -55,7 +55,12 @@ pub fn poll(inbox: &Inbox, app: &mut filmcraft_ui_egui::FilmcraftApp, ctx: &egui
             Event::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
         }
     }
-    for (id, params) in arrival_commands(&documents) {
+    let dirty = app.session.is_dirty();
+    if dirty && let Some(path) = documents.iter().find(|path| crate::args::is_project(path)) {
+        let name = std::path::Path::new(path).file_name().unwrap_or_else(|| std::ffi::OsStr::new(path)).to_string_lossy();
+        app.ui.status = format!("Save the current project first, then open {name} again.");
+    }
+    for (id, params) in arrival_commands(&documents, dirty) {
         if let Err(e) = app.session.execute(id, params) {
             log::error!("{id}: {e}");
             app.ui.status = e.to_string();
@@ -70,16 +75,29 @@ mod tests {
 
     #[test]
     fn media_arrivals_import_into_the_open_project() {
-        assert_eq!(arrival_commands(&["/n/a b/clip.mp4".into(), "/n/x.png".into()]), vec![("file.import", json!({"paths": ["/n/a b/clip.mp4", "/n/x.png"]}))]);
+        assert_eq!(
+            arrival_commands(&["/n/a b/clip.mp4".into(), "/n/x.png".into()], false),
+            vec![("file.import", json!({"paths": ["/n/a b/clip.mp4", "/n/x.png"]}))]
+        );
     }
 
     #[test]
     fn a_project_file_still_opens_as_a_project() {
-        assert_eq!(arrival_commands(&["/p/reel.fcproj".into()]), vec![("file.open", json!({"path": "/p/reel.fcproj"}))]);
+        assert_eq!(arrival_commands(&["/p/reel.fcproj".into()], false), vec![("file.open", json!({"path": "/p/reel.fcproj"}))]);
+    }
+
+    #[test]
+    fn a_project_arrival_does_not_replace_unsaved_work() {
+        assert!(arrival_commands(&["/p/reel.fcproj".into()], true).is_empty());
+    }
+
+    #[test]
+    fn a_dirty_session_still_imports_media_when_a_project_arrives() {
+        assert_eq!(arrival_commands(&["/p/reel.fcproj".into(), "/n/clip.mp4".into()], true), vec![("file.import", json!({"paths": ["/n/clip.mp4"]}))]);
     }
 
     #[test]
     fn nothing_arrives_nothing_runs() {
-        assert!(arrival_commands(&[]).is_empty());
+        assert!(arrival_commands(&[], false).is_empty());
     }
 }
