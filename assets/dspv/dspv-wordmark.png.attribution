@@ -1,0 +1,8 @@
+asset:        dspv-wordmark.png
+title:        DSPV placeholder wordmark (square mark and "DSPV"), dark ink for light backgrounds
+author:       DSPV Media
+source:       original work, drawn by projects/dspv-craft-suite/templates/wordmark/make-wordmark.py (DSPV monorepo) with assets/fonts/Inter-Bold.ttf
+license:      MIT OR Apache-2.0 (the image only; the DSPV name is a DSPV Media trademark, which no licence here grants, see Apache-2.0 section 6)
+license-file: LICENSE-MIT
+added:        2026-10-22 by Claude (agent) for Drake Smith (DSPV Media)
+notes:        742x256 PNG, transparent background. Bundled in the app (About dialog, Home screen) in place of the ArtCraft wordmark, which a modified version may not keep. Inter is OFL-1.1, which allows the font to be used to draw a logo; the image is not a font.
