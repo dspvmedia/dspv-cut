@@ -65,6 +65,31 @@
         <string>ai.storyteller.filmcraft.project</string>
       </array>
     </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Media</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>png</string>
+        <string>jpg</string>
+        <string>jpeg</string>
+        <string>webp</string>
+        <string>gif</string>
+        <string>tif</string>
+        <string>tiff</string>
+        <string>mp4</string>
+        <string>mov</string>
+        <string>m4v</string>
+        <string>wav</string>
+        <string>mp3</string>
+        <string>m4a</string>
+        <string>aac</string>
+        <string>flac</string>
+        <string>aiff</string>
+      </array>
+    </dict>
   </array>
 
   <!-- Filmcraft's own format. -->

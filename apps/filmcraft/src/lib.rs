@@ -23,6 +23,8 @@
 
 mod app_nap;
 mod appearance;
+#[cfg(any(target_os = "macos", test))]
+mod apple_events;
 mod args;
 mod audio;
 mod audio_in;
@@ -144,12 +146,25 @@ pub fn run_with_host(startup: impl FnOnce(), extend: impl Fn(&mut filmcraft_ui_e
     if graphics.mode() == graphics::Mode::Default {
         register_gpu_frame_renderer();
     }
+    #[cfg(target_os = "macos")]
+    let apple_events = apple_events::AppleEvents::install();
     let started = loop {
         let mut options = native_options(launch.control_port.is_some());
         // Before eframe creates the wgpu instance (e.g. no OpenGL on Windows, see graphics.rs).
         graphics::apply(&mut options, graphics.mode(), backend_override);
         let app_created = Arc::new(AtomicBool::new(false));
-        let result = eframe::run_native("FilmCraft", options, app_creator(launch.clone(), graphics.clone(), Arc::clone(&app_created), Arc::clone(&extend)));
+        let result = eframe::run_native(
+            "FilmCraft",
+            options,
+            app_creator(
+                launch.clone(),
+                graphics.clone(),
+                Arc::clone(&app_created),
+                Arc::clone(&extend),
+                #[cfg(target_os = "macos")]
+                &apple_events,
+            ),
+        );
         let app_created = app_created.load(Ordering::Relaxed);
         match &result {
             // wgpu reported the failure (no adapter, device creation failed) before the app
@@ -203,7 +218,13 @@ fn native_options(agent: bool) -> eframe::NativeOptions {
 /// What the product built on the editor adds to the host hooks (see [`run_with_host`]).
 type HostExtend = Arc<dyn Fn(&mut filmcraft_ui_egui::HostHooks) + Send + Sync>;
 
-fn app_creator(launch: Launch, graphics: graphics::GraphicsStart, created: Arc<AtomicBool>, extend: HostExtend) -> eframe::AppCreator<'static> {
+fn app_creator<'a>(
+    launch: Launch,
+    graphics: graphics::GraphicsStart,
+    created: Arc<AtomicBool>,
+    extend: HostExtend,
+    #[cfg(target_os = "macos")] events: &'a apple_events::AppleEvents,
+) -> eframe::AppCreator<'a> {
     let Launch { control_port, control_input_only, files, demo, startup_flag, recover, data_dir, graphics: _ } = launch;
     Box::new(move |cc| {
         created.store(true, Ordering::Relaxed);
@@ -265,6 +286,18 @@ fn app_creator(launch: Launch, graphics: graphics::GraphicsStart, created: Arc<A
         }
         let mut app = FilmcraftApp::new(session);
         extend(&mut app.hooks);
+        #[cfg(target_os = "macos")]
+        {
+            let inbox = events.connect(&cc.egui_ctx);
+            let ctx = cc.egui_ctx.clone();
+            let mut host_tick = app.hooks.host_tick.take();
+            app.hooks.host_tick = Some(Box::new(move |app| {
+                apple_events::poll(&inbox, app, &ctx);
+                if let Some(tick) = &mut host_tick {
+                    tick(app);
+                }
+            }));
+        }
         app.graphics_notice = notice;
         if recover == Some(false) {
             app.dialog = None;
