@@ -24,8 +24,10 @@ Public-domain film and NASA frames and CC0 music shown in README screenshots (do
 DSPV Media modifications
 This copy is a fork maintained by DSPV Media (github.com/dspvmedia/dspv-cut). It is based on FilmCraft
 by the ArtCraft team and community. Our changes are on the dspv/* branches; `git log
-upstream-main..dspv/nlog-transform` lists them. The ArtCraft name, wordmark and logos are not used in
-this fork: the app shows a DSPV placeholder wordmark (assets/dspv/, see ATTRIBUTION.md).
+upstream-main..dspv/nlog-transform` lists them. The app built from this fork shows no ArtCraft
+wordmark or logos (it shows a DSPV placeholder wordmark instead: assets/dspv/, see ATTRIBUTION.md) and
+does not link to the ArtCraft Discord or website. It names ArtCraft only in the plain-text credit
+"Based on FilmCraft by the ArtCraft team" in its About box.
 
 DSPV Media: further third-party notices (licence audit of 2026-10-22)
 

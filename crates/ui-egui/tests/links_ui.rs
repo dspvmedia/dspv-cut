@@ -1,5 +1,5 @@
-//! Headless UI test of the community links: Help menu commands, the header Discord button, the
-//! About dialog and the Home (Import) screen.
+//! Headless UI test of the project links: Help menu commands, the About dialog and the Home (Import)
+//! screen, and (DSPV fork) that none of them, nor the header, links the ArtCraft community.
 //!
 //! Set `FILMCRAFT_UI_SNAPSHOT_DIR=<dir>` to also render the window offscreen with wgpu and write
 //! `links-*.png` there; without it no GPU is needed.
@@ -78,7 +78,7 @@ impl Driver {
 }
 
 #[test]
-fn community_links_everywhere() {
+fn project_links_everywhere_and_no_artcraft_community() {
     let mut d = Driver::demo();
     // Help menu: every link is a command that reports the URL it opened.
     for (id, _, url) in links::ALL {
@@ -90,26 +90,41 @@ fn community_links_everywhere() {
     for (id, label, _) in links::ALL {
         assert!(text.contains(id) && text.contains(label), "Help menu lists {id}");
     }
-    // Header: the Discord button is always there.
-    assert_eq!(d.ids("header.discord"), vec!["header.discord".to_string()]);
+    // DSPV fork (licence audit 2026-10-22): a modified version may not present itself as part of the
+    // ArtCraft community, so no menu, button or screen links the ArtCraft Discord or website.
+    let no_artcraft = |what: &str, text: &str| {
+        let lower = text.to_lowercase();
+        for banned in ["artcraft discord", "artcraft website", "discord.gg", "getartcraft", "help.discord", "help.website", "help.appPage"] {
+            assert!(!lower.contains(&banned.to_lowercase()), "{what} still has {banned:?}: {text}");
+        }
+    };
+    no_artcraft("the menus", &text);
+    // Header: no Discord button.
+    assert!(d.ids("header.discord").is_empty(), "the header has no Discord button");
+    no_artcraft("the header", &d.ok("ui.elements", json!({"prefix": "header."})).to_string());
     d.snapshot("header");
-    // About dialog: Discord first, then website, app page, GitHub, issues.
+    // About dialog: the source code links only.
     d.ok("engine.execute", json!({"command": "app.about", "params": {}}));
     d.frames(3);
     let about = d.ids("about.");
-    for id in ["about.discord", "about.website", "about.appPage", "about.github", "about.reportIssue"] {
+    for id in ["about.github", "about.reportIssue"] {
         assert!(about.iter().any(|a| a == id), "{id} in {about:?}");
     }
+    for id in ["about.discord", "about.website", "about.appPage"] {
+        assert!(!about.iter().any(|a| a == id), "{id} is gone from {about:?}");
+    }
+    no_artcraft("the About dialog", &d.ok("ui.elements", json!({"prefix": "about."})).to_string());
     d.snapshot("about");
     d.ok("ui.key", json!({"key": "Escape"}));
     d.frames(3);
     assert!(d.ids("about.").is_empty(), "Escape closes About");
-    // Home screen (Import mode): community links.
+    // Home screen (Import mode): the source code link, labelled as itself (upstream's first link was
+    // relabelled "Join us on Discord").
     d.ok("engine.execute", json!({"command": "mode.import", "params": {}}));
     d.frames(3);
-    let home = d.ids("import.link.");
-    for id in ["import.link.discord", "import.link.website", "import.link.appPage", "import.link.github"] {
-        assert!(home.iter().any(|a| a == id), "{id} in {home:?}");
-    }
+    assert_eq!(d.ids("import.link."), vec!["import.link.github".to_string()]);
+    let home = d.ok("ui.elements", json!({"prefix": "import.link."}));
+    assert_eq!(home[0]["label"], json!("FilmCraft on GitHub"), "{home}");
+    no_artcraft("the Home screen", &home.to_string());
     d.snapshot("home");
 }

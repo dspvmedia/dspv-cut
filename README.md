@@ -1,6 +1,9 @@
 > **DSPV fork.** This branch is DSPV Media's modified copy of FilmCraft by the ArtCraft team and
-> community. As the ArtCraft brand terms require of a modified version, it does not carry the ArtCraft
-> name, wordmark or logos (upstream keeps them in `docs/brand/`).
+> community. As the ArtCraft brand terms require of a modified version, the app built from it shows no
+> ArtCraft wordmark or logos (upstream keeps them in `docs/brand/`) and does not link to the ArtCraft
+> Discord or website. The only place the app names ArtCraft is the plain-text credit "Based on
+> FilmCraft by the ArtCraft team" in About. The rest of this README is upstream's text about upstream
+> FilmCraft; its links go to the upstream project, which does not support this fork.
 
 
 <h1 align="center">FilmCraft</h1>
@@ -457,7 +460,8 @@ FilmCraft is an independent implementation. It contains no proprietary code, ico
 
 The ArtCraft name, wordmark and logos are trademarks of the ArtCraft Team and are not covered by
 this license. Upstream keeps them in `docs/brand/` with their terms; forks and modified versions must
-remove them, and this fork has.
+remove them. This fork has removed the wordmark and logos, and the app's links to the ArtCraft
+community; the name appears only in the plain-text credit above.
 
 <br>
 

@@ -1,27 +1,21 @@
-//! Community and project links (Help menu, About dialog, header Discord button, Home screen).
+//! Project links (Help menu, About dialog, Home screen).
 //!
-//! FilmCraft is part of the ArtCraft family: the community lives on the ArtCraft Discord, every
-//! app has a page on the ArtCraft website and a public GitHub repository.
+//! DSPV fork: upstream also links the ArtCraft Discord, the ArtCraft website and FilmCraft's page
+//! there (Help menu, About, a header button and Home). The ArtCraft brand terms do not let a
+//! modified version present itself as an ArtCraft product or part of its community, so those links
+//! are removed; the only credit is the plain-text "Based on FilmCraft by the ArtCraft team" in
+//! About. `no_artcraft_community_links` below keeps them from coming back with an upstream sync.
 
 /// The app's short name, used in the website and repository URLs.
 pub const APP: &str = "filmcraft";
 
-/// The ArtCraft community Discord.
-pub const DISCORD: &str = "https://discord.gg/artcraft";
-/// The ArtCraft website.
-pub const WEBSITE: &str = "https://getartcraft.com";
-/// FilmCraft's page on the ArtCraft website.
-pub const APP_PAGE: &str = "https://getartcraft.com/apps/filmcraft";
 /// FilmCraft's source repository.
 pub const GITHUB: &str = "https://github.com/storytold/filmcraft";
 /// New issue on FilmCraft's repository.
 pub const ISSUES: &str = "https://github.com/storytold/filmcraft/issues";
 
 /// (command id, label, url) for every link, in menu order.
-pub const ALL: [(&str, &str, &str); 5] = [
-    ("help.discord", "Join the ArtCraft Discord…", DISCORD),
-    ("help.website", "ArtCraft Website", WEBSITE),
-    ("help.appPage", "FilmCraft on getartcraft.com", APP_PAGE),
+pub const ALL: [(&str, &str, &str); 2] = [
     ("help.github", "FilmCraft on GitHub", GITHUB),
     ("help.reportIssue", "Report an Issue…", ISSUES),
 ];
@@ -125,17 +119,66 @@ mod tests {
     use super::*;
 
     #[test]
-    fn urls_follow_the_artcraft_scheme() {
-        assert_eq!(APP_PAGE, format!("{WEBSITE}/apps/{APP}"));
+    fn urls_follow_the_repository_scheme() {
         assert_eq!(GITHUB, format!("https://github.com/storytold/{APP}"));
         assert!(ALL.iter().all(|(id, _, u)| id.starts_with("help.") && u.starts_with("https://")));
-        assert_eq!(url_for("help.discord"), Some(DISCORD));
+        assert_eq!(url_for("help.github"), Some(GITHUB));
+        assert_eq!(url_for("help.discord"), None);
         assert_eq!(url_for("help.nope"), None);
+    }
+
+    /// DSPV fork (licence audit 2026-10-22): no shipped source or catalog may link or name the ArtCraft
+    /// community again. Upstream syncs bring these back (Help menu, native app menu, header button,
+    /// About, Home), so this fails the merge instead. Comments may say what upstream does; the plain
+    /// "Based on FilmCraft by the ArtCraft team" credit in About is allowed.
+    #[test]
+    fn no_artcraft_community_links() {
+        // split so this file does not match itself
+        let banned = [
+            concat!("discord.gg/", "artcraft"),
+            concat!("getart", "craft.com"),
+            concat!("ArtCraft ", "Discord"),
+            concat!("ArtCraft ", "Website"),
+            concat!("ArtCraft ", "family"),
+        ];
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut dirs = vec![root.join("src"), root.join("../../apps/filmcraft/src")];
+        let (mut seen, mut bad) = (0, Vec::new());
+        while let Some(d) = dirs.pop() {
+            for entry in std::fs::read_dir(&d).unwrap_or_else(|e| panic!("{}: {e}", d.display())).flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    dirs.push(p);
+                    continue;
+                }
+                let ext = p.extension().and_then(|e| e.to_str()).unwrap_or_default();
+                if ext != "rs" && ext != "tsv" {
+                    continue;
+                }
+                seen += 1;
+                let text = std::fs::read_to_string(&p).unwrap();
+                for (n, line) in text.lines().enumerate() {
+                    let t = line.trim_start();
+                    let hit = if ext == "tsv" {
+                        // a catalog entry (not a # comment) that names ArtCraft at all
+                        !t.starts_with('#') && line.to_lowercase().contains("artcraft")
+                    } else {
+                        !t.starts_with("//") && banned.iter().any(|b| line.contains(b))
+                    };
+                    if hit {
+                        bad.push(format!("{}:{}: {}", p.display(), n + 1, line.trim()));
+                    }
+                }
+            }
+        }
+        assert!(seen > 50, "only {seen} files scanned");
+        assert!(bad.is_empty(), "ArtCraft community links or names are back:\n{}", bad.join("\n"));
+        assert!(ALL.iter().all(|(_, label, url)| !label.contains("ArtCraft") && !url.contains("artcraft")), "{ALL:?}");
     }
 
     #[test]
     fn links_open_through_the_host_hook() {
-        // #642: on the desktop every link (Help menu, About, Discord button, Import screen) must
+        // #642: on the desktop every link (Help menu, About, Import screen) must
         // reach the host's browser opener; `ctx.open_url` alone is a no-op natively.
         use std::cell::RefCell;
         use std::rc::Rc;
@@ -152,8 +195,8 @@ mod tests {
             assert_eq!(r["url"], url, "{id}");
             assert_eq!(opened.borrow().last().map(String::as_str), Some(url), "{id}");
         }
-        open(&mut app, &ctx, DISCORD);
-        assert_eq!(opened.borrow().last().map(String::as_str), Some(DISCORD));
+        open(&mut app, &ctx, GITHUB);
+        assert_eq!(opened.borrow().last().map(String::as_str), Some(GITHUB));
         assert_eq!(opened.borrow().len(), ALL.len() + 1);
 
         // A failing opener falls back to `ctx.open_url` instead of losing the click.
