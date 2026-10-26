@@ -12,6 +12,7 @@
 //! await filmcraft.importFiles(input.files)                 // File / FileList / File[]
 //! await filmcraft.openProject(file)                        // .fcproj File or URL
 //! filmcraft.files(); await filmcraft.readFile("/exports/a.mp4"); filmcraft.info()
+//! await filmcraft.crashedSnapshot()                        // the autosave put aside after it crashed a reload (bytes or null)
 //! ```
 //!
 //! Results resolve with the method's `result`; errors reject with the error message.
@@ -154,6 +155,12 @@ pub fn install() -> Result<(), JsValue> {
             let mut v = crate::info();
             v["webcodecsStats"] = crate::webcodecs::stats();
             v["fetchesInFlight"] = json!(crate::fs::inflight());
+            // the wasm heap (a 32-bit address space: 4 GiB is the ceiling)
+            v["wasmMemoryBytes"] = js_sys::Reflect::get(&wasm_bindgen::memory(), &"buffer".into())
+                .ok()
+                .and_then(|b| js_sys::Reflect::get(&b, &"byteLength".into()).ok())
+                .and_then(|n| n.as_f64())
+                .map_or(Value::Null, |n| json!(n));
             to_js(&v)
         })
         .into_js_value(),
@@ -174,6 +181,16 @@ pub fn install() -> Result<(), JsValue> {
                 let blob = crate::fs::blob(&path).ok_or_else(|| JsValue::from_str(&format!("{path}: not found")))?;
                 let buf = JsFuture::from(blob.array_buffer()).await?;
                 Ok(js_sys::Uint8Array::new(&buf).into())
+            }))
+        })
+        .into_js_value(),
+    )?;
+    set_fn(
+        &obj,
+        "crashedSnapshot",
+        Closure::<dyn Fn() -> js_sys::Promise>::new(|| {
+            future_to_promise(caught(async move {
+                Ok(crate::recovery::crashed_snapshot().await.map_or(JsValue::NULL, |b| js_sys::Uint8Array::from(&b[..]).into()))
             }))
         })
         .into_js_value(),

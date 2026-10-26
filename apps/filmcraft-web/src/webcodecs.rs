@@ -33,6 +33,8 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
+use crate::decode_budget::{FRAME_BUDGET, FrameCache, MAX_DECODERS, Open, pick_victim};
+
 mod pixels;
 
 #[derive(Default)]
@@ -49,8 +51,6 @@ struct Transfers {
 
 /// Samples fed past the wanted one (decoders hold pictures for reordering).
 const LOOKAHEAD: usize = 8;
-/// Decoded frames kept per source.
-const CACHE_FRAMES: usize = 40;
 /// Chunks allowed in the decoder's queue before feeding pauses.
 const MAX_QUEUE: u32 = 24;
 /// A session that delivered nothing for this long may be restarted by another request.
@@ -66,6 +66,8 @@ thread_local! {
     static FALLBACKS: Cell<u64> = const { Cell::new(0) };
     static SOURCES: Cell<u64> = const { Cell::new(0) };
     static TRANSFERS: RefCell<Transfers> = RefCell::new(Transfers::default());
+    /// Decoded pictures of every source, under one byte budget ([`crate::decode_budget`]).
+    static FRAMES: RefCell<FrameCache<Arc<VideoFrame>>> = RefCell::new(FrameCache::default());
 }
 
 fn now_ms() -> f64 {
@@ -182,7 +184,7 @@ pub fn stats() -> serde_json::Value {
         let s = s.borrow();
         json!({"nativeFrames":s.native,"canvasFrames":s.canvas,"closedFrames":s.closed,"staleFrames":s.stale,"nativeBytes":s.bytes,"nativeMs":s.native_ms,"canvasMs":s.canvas_ms,"canvasReasons":s.reasons})
     });
-    json!({"sources": SOURCES.with(Cell::get), "framesDecoded": DECODED.with(Cell::get), "fallbacks": FALLBACKS.with(Cell::get), "sessions": sessions,"transfers":transfers})
+    json!({"sources": SOURCES.with(Cell::get), "framesDecoded": DECODED.with(Cell::get), "fallbacks": FALLBACKS.with(Cell::get), "sessions": sessions, "sessionCount": sessions.len(), "cachedBytes": FRAMES.with(|f| f.borrow().bytes()), "cachedFrames": FRAMES.with(|f| f.borrow().len()), "transfers":transfers})
 }
 
 /// A [`SharedReader`] as the demuxer's byte source.
@@ -256,8 +258,17 @@ struct Config {
 
 #[derive(Default)]
 struct Cache {
-    frames: BTreeMap<i64, Arc<VideoFrame>>,
     failed: bool,
+}
+
+/// Close the idle decoder that delivered longest ago once [`MAX_DECODERS`] are open, so another can open (the clip it
+/// belonged to restarts at a key frame when next shown). Decoders working towards a frame are never closed.
+fn close_idle_beyond_cap(ss: &mut HashMap<u32, Session>) {
+    let now = now_ms();
+    let open: Vec<Open> = ss.iter().map(|(id, s)| Open { id: *id, busy: s.busy(now), last_output: s.last_output.get() }).collect();
+    if let Some(victim) = pick_victim(&open, MAX_DECODERS) {
+        ss.remove(&victim);
+    }
 }
 
 /// The browser decoder of one source (UI thread only; JS objects are not `Send`).
@@ -413,6 +424,12 @@ impl Session {
         call(&self.decoder, "configure", &[&obj(&pairs)]).map(|_| ())
     }
 
+    /// Working towards the frame it was started for (or copying a picture out): another request must not take it over.
+    fn busy(&self, now: f64) -> bool {
+        let fresh = now - self.last_output.get() < STALE_MS;
+        self.flushing.get() || (fresh && (self.copying.get() > 0 || (!self.needs_key && self.target != i64::MIN && self.out_max.get() < self.target)))
+    }
+
     fn queue(&self) -> u32 {
         get(&self.decoder, "decodeQueueSize").as_f64().unwrap_or(0.0) as u32
     }
@@ -446,12 +463,19 @@ enum Drive {
 }
 
 impl WcSource {
+    fn cached(&self, pts: i64) -> Option<Arc<VideoFrame>> {
+        FRAMES.with(|c| c.borrow_mut().get(self.id, pts))
+    }
+
     /// Make progress towards sample `i` (presentation `want`).
     fn drive(&self, i: usize, want: i64) -> Drive {
         let t = &self.file.tracks[self.track];
         let n = t.samples.len();
         SESSIONS.with(|ss| {
             let mut ss = ss.borrow_mut();
+            if !ss.contains_key(&self.id) {
+                close_idle_beyond_cap(&mut ss);
+            }
             let s = match ss.entry(self.id) {
                 std::collections::hash_map::Entry::Occupied(o) => o.into_mut(),
                 std::collections::hash_map::Entry::Vacant(v) => match Session::new(&self.config) {
@@ -540,7 +564,7 @@ impl WcSource {
     }
 
     /// Move decoded pictures into the cache.
-    fn collect(&self, c: &mut Cache, want: i64) {
+    fn collect(&self, want: i64) {
         let out = SESSIONS.with(|ss| {
             let ss = ss.borrow();
             let Some(s) = ss.get(&self.id) else { return Vec::new() };
@@ -548,11 +572,8 @@ impl WcSource {
         });
         for (pts, f) in out {
             let f = if self.config.rotation != 0 { f.rotated(self.config.rotation) } else { f };
-            c.frames.insert(pts, Arc::new(f));
-        }
-        while c.frames.len() > CACHE_FRAMES {
-            let Some(far) = c.frames.keys().copied().max_by_key(|p| (p - want).abs()) else { break };
-            c.frames.remove(&far);
+            let bytes = f.byte_size();
+            FRAMES.with(|c| c.borrow_mut().insert(self.id, pts, Arc::new(f), bytes, want, FRAME_BUDGET));
         }
         // the session's own frame came out: other requests may restart it now
         SESSIONS.with(|ss| {
@@ -570,6 +591,11 @@ impl Drop for WcSource {
         SESSIONS.with(|ss| {
             if let Ok(mut ss) = ss.try_borrow_mut() {
                 ss.remove(&self.id);
+            }
+        });
+        FRAMES.with(|f| {
+            if let Ok(mut f) = f.try_borrow_mut() {
+                f.remove_source(self.id);
             }
         });
     }
@@ -592,15 +618,15 @@ impl MediaSource for WcSource {
         let target = req.time.max(Tick::ZERO).to_rational_round(1, t.timescale.max(1) as i64);
         let i = t.sample_at_presentation_time(target).unwrap_or(n - 1).min(n - 1);
         let want = t.samples[i].pts;
-        self.collect(&mut c, want);
-        if let Some(f) = c.frames.get(&want) {
-            return Ok(f.clone());
+        self.collect(want);
+        if let Some(f) = self.cached(want) {
+            return Ok(f);
         }
         match self.drive(i, want) {
             Drive::Waiting => {
-                self.collect(&mut c, want);
-                if let Some(f) = c.frames.get(&want) {
-                    return Ok(f.clone());
+                self.collect(want);
+                if let Some(f) = self.cached(want) {
+                    return Ok(f);
                 }
                 filmcraft_media::pending::mark();
                 Err(MediaError::Decode("WebCodecs: decoding".into()))

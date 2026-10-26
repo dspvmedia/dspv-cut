@@ -31,7 +31,7 @@ unaffected; `cargo xtask wasm` (part of `cargo xtask ci`) checks it, with `filmc
 URL flags: `?empty` (no demo project), `?norecover` (don't reopen the auto-saved project),
 `?fresh` (also don't restore media kept in OPFS), `?cpu` (CPU compositor), `?webgl` (WebGL2 only;
 the page reloads with it when WebGPU is present but fails to start), `?nowebcodecs` (decode with
-FilmCraft's own decoders only).
+FilmCraft's own decoders only), `?recoverforce` (reopen the auto-saved project even though the last attempt did not survive).
 
 If the app panics after start-up (or runs out of memory), `index.html` shows a "FilmCraft stopped
 working" overlay with the panic message and a Reload button instead of a frozen canvas, and sets
@@ -89,6 +89,25 @@ RGBA (drawn on an `OffscreenCanvas`) into a per-source frame cache, and the retr
 it. Codec support is probed at start-up with `VideoDecoder.isConfigSupported`; any decoder error
 switches that source to our decoder.
 
+**Open cost does not grow with the number of clips** (`src/decode_budget.rs`). Every imported clip keeps a
+`WcSource`, and counted per clip its decoder and its decoded pictures filled the 4 GiB wasm heap on their own
+(about 118 MB of pictures per 1080p clip: a project of about 30 clips hung the page, 78 aborted it). Both are now
+shared budgets: decoded pictures of all clips together are held to 256 MiB (least recently used first, never the
+picture just stored; at most 40 per clip, the ones nearest the wanted frame), and at most 6 browser decoders are
+open at once (a decoder that is idle is closed for the next one; its clip restarts at a key frame when next shown,
+and a decoder working towards a frame is never closed). Measured with 120 synthetic 1080p60 clips (headless Chrome,
+`filmcraft.info().wasmMemoryBytes`): the heap stays at about 850 MB from the 25th clip to the 120th. What still
+grows with clips is small: the project, one open file and its sample table per clip.
+
+### Crash-loop guard
+
+The auto-saved project is reopened on the next visit. If reopening it is what crashes the page, reloading would
+crash it again, for ever. So reopening sets `localStorage["filmcraft.recovering"]` (it survives a crashed tab) and the
+page removes it once it has stayed up for 45 s (`src/recovery_guard.rs`). A page that starts with the marker still
+set does not reopen the autosave: it moves it to `recovery/crashed.fcproj` in OPFS, marks the recovery journal clean,
+starts clean and says so (`filmcraft.crashedSnapshot()` returns those bytes). The fatal-error dialog's **Start a new
+project** sets the same marker and reloads. `?recoverforce` tries the reopening again.
+
 ### Audio
 
 `audio::Handle` implements `AudioOut`. The UI thread mixes the sequence 250 ms ahead in 2048-frame
@@ -120,8 +139,9 @@ with the method's `result`, errors reject.
 | `filmcraft.importUrl(url, name?)` | fetch a URL and import it (tests) |
 | `filmcraft.openProject(fileOrUrl)` | open a `.fcproj` |
 | `filmcraft.files()` | the virtual files: `{path, size, kind}` |
+| `filmcraft.crashedSnapshot()` | the autosave that was put aside after it crashed a reload (bytes, or `null`) |
 | `filmcraft.readFile(path)` | a file's bytes (`Uint8Array`), e.g. an export |
-| `filmcraft.info()` | backend, compositor, isolation, OPFS, WebCodecs support and counters, start-up time |
+| `filmcraft.info()` | backend, compositor, isolation, OPFS, WebCodecs support and counters (open decoders, decoded pictures held), `wasmMemoryBytes`, start-up time |
 
 `window.filmcraftLoad` holds `{wasmMs, readyMs}` (module fetch+compile, and until the app runs).
 

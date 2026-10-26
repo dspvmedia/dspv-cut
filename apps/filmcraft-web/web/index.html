@@ -25,6 +25,7 @@
     #fatal h1 { margin: 0 0 8px; font-size: 17px; color: #ff8a7a; }
     #fatal pre { max-height: 40vh; overflow: auto; white-space: pre-wrap; font-size: 12px; color: #c9c9cc; }
     #fatal button { font: inherit; padding: 6px 14px; border: 0; border-radius: 6px; background: #3b6fe0; color: #fff; cursor: pointer; }
+    #fatal button.secondary { background: #45474d; margin-left: 8px; }
   </style>
 </head>
 <body>
@@ -33,9 +34,10 @@
   <div id="fatal" role="alertdialog" aria-labelledby="fatal-title">
     <div class="box">
       <h1 id="fatal-title">FilmCraft stopped working</h1>
-      <div>Unsaved changes are kept in the browser every few seconds and come back when you reload.</div>
+      <div>Unsaved changes are kept in the browser every few seconds and come back when you reload. If the project is too big for the browser, reloading can stop it again: start a new project instead, and the autosave is kept aside.</div>
       <pre id="fatal-msg"></pre>
       <button id="fatal-reload" type="button">Reload</button>
+      <button id="fatal-new" type="button" class="secondary">Start a new project</button>
     </div>
   </div>
   <script>
@@ -59,6 +61,17 @@
       el.classList.add("on");
     };
     document.getElementById("fatal-reload").onclick = () => location.reload();
+    // The same marker the editor leaves while it reopens an autosave (src/recovery_guard.rs): the next start puts the autosave
+    // aside instead of reopening it, then starts clean.
+    document.getElementById("fatal-new").onclick = () => {
+      let stored = false;
+      try { localStorage.setItem("filmcraft.recovering", String(Date.now())); stored = true; } catch (e) { /* storage blocked */ }
+      if (stored) { location.reload(); return; }
+      // No storage for the marker: ask for a clean start in the address instead (this leaves the autosave as it is).
+      const q = new URLSearchParams(location.search);
+      q.set("norecover", "");
+      location.replace(location.pathname + "?" + q.toString().replace(/=(&|$)/g, "$1") + location.hash);
+    };
     const isFatal = (e) => e instanceof WebAssembly.RuntimeError || /panicked at|unreachable|memory access out of bounds/.test(String(e && e.message || e));
     // only after start-up: a failed start is shown in #loading below
     addEventListener("error", (ev) => { if (window.filmcraftLoad.readyMs && isFatal(ev.error || ev.message)) window.filmcraftFatal(ev.error || ev.message); });
