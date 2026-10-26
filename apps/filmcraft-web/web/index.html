@@ -68,9 +68,9 @@
       try { localStorage.setItem("filmcraft.recovering", String(Date.now())); stored = true; } catch (e) { /* storage blocked */ }
       if (stored) { location.reload(); return; }
       // No storage for the marker: ask for a clean start in the address instead (this leaves the autosave as it is).
-      const q = new URLSearchParams(location.search);
-      q.set("norecover", "");
-      location.replace(location.pathname + "?" + q.toString().replace(/=(&|$)/g, "$1") + location.hash);
+      const next = new URL(location.href);
+      next.searchParams.set("norecover", "");
+      location.replace(next.href);
     };
     const isFatal = (e) => e instanceof WebAssembly.RuntimeError || /panicked at|unreachable|memory access out of bounds/.test(String(e && e.message || e));
     // only after start-up: a failed start is shown in #loading below
@@ -95,8 +95,9 @@
       window.filmcraftLoad.error = String(e);
       // WebGPU was found but could not be started: try again on WebGL2 (once)
       if (!params.has("webgl") && !params.has("cpu") && /wgpu|webgpu|requestDevice|requestAdapter|GPUDevice|surface/i.test(text)) {
-        params.set("webgl", "");
-        location.replace(location.pathname + "?" + params.toString().replace(/=(&|$)/g, "$1") + location.hash);
+        const next = new URL(location.href);
+        next.searchParams.set("webgl", "");
+        location.replace(next.href);
       } else {
         const s = document.getElementById("status");
         if (s) { s.className = "err"; s.textContent = "FilmCraft failed to start:\n" + text; }
