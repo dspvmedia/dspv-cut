@@ -130,6 +130,8 @@ fn visible_captions_burn_in_unless_the_export_says_otherwise() {
     assert!(!burns(&mut s, json!({"settings":{"burnCaptions":false}})), "an explicit no inside settings is kept");
     assert!(!burns(&mut s, json!({"captionSidecar":"srt"})), "a sidecar request is a caption choice");
     assert!(burns(&mut s, json!({"burnCaptions":true})));
+    let queued = s.execute("export.queue.add", json!({"format":"h264", "path":"/tmp/q.mp4"})).unwrap();
+    assert!(s.export_queue.items.last().is_some_and(|i| i.settings.burn_captions), "the queue too: {queued}");
     s.execute("captions.hideAll", json!({})).unwrap();
     assert!(!burns(&mut s, json!({})), "hidden caption tracks are not burned in");
 }

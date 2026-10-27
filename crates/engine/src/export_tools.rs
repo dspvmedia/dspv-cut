@@ -765,6 +765,7 @@ fn queue_add(s: &mut Session, p: &Value) -> Result<Value> {
     for &seq in &seqs {
         for r in &ranges {
             let mut st = settings.clone();
+            apply_caption_default(&project, seq, p, &mut st);
             let times = match r {
                 Some(v) if v.is_object() => *v,
                 _ => p,
