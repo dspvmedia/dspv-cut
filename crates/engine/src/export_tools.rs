@@ -532,10 +532,29 @@ fn file_name(path: &str) -> String {
 }
 
 /// `file.exportMedia`: export the active (or `sequence`) sequence now.
+/// DSPV: true when `seq` shows captions, i.e. has a visible (eye on) caption track with captions on it. An export that makes no caption
+/// choice of its own then burns them in: a social video whose captions vanish on export was the surprise of 2026-10-27.
+pub fn shows_captions(q: &filmcraft_project::Sequence) -> bool {
+    q.caption_tracks.iter().any(|t| t.enabled && !t.captions.is_empty())
+}
+
+/// DSPV: `file.exportMedia` with no `burnCaptions` / `captionSidecar` (flat or in `settings`) and no sidecar from its preset burns the
+/// visible caption tracks in. An explicit choice, `burnCaptions: false` included, is always kept.
+pub fn apply_caption_default(project: &Project, seq: ItemId, p: &Value, settings: &mut ExportSettings) {
+    let chosen = |v: &Value| ["burnCaptions", "captionSidecar"].iter().any(|k| v.get(*k).is_some());
+    if chosen(p) || p.get("settings").is_some_and(chosen) || settings.caption_sidecar.is_some() {
+        return;
+    }
+    if project.sequence(seq).is_some_and(shows_captions) {
+        settings.burn_captions = true;
+    }
+}
+
 pub fn export_media(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.exportMedia";
     let seq = sequence_param(s, p, cmd)?;
     let (preset, mut settings) = settings_from_params(s, p, cmd)?;
+    apply_caption_default(&s.project, seq, p, &mut settings);
     if str_p(p, "path").is_none() {
         return Err(bad(cmd, "need `path`"));
     }
@@ -924,6 +943,7 @@ fn resolve(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "export.resolve";
     let seq = sequence_param(s, p, cmd)?;
     let (preset, mut settings) = settings_from_params(s, p, cmd)?;
+    apply_caption_default(&s.project, seq, p, &mut settings);
     let project = s.project.clone();
     settings.range = range_param(s, &project, seq, p.get("range"), p, cmd)?;
     settings.path = output_path(s, p, seq, &settings, None);
