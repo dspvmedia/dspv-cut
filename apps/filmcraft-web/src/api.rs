@@ -198,9 +198,11 @@ pub fn install() -> Result<(), JsValue> {
     set_fn(
         &obj,
         "importFiles",
-        Closure::<dyn Fn(JsValue) -> js_sys::Promise>::new(|files: JsValue| {
+        Closure::<dyn Fn(JsValue, JsValue) -> js_sys::Promise>::new(|files: JsValue, options: JsValue| {
             let files = files_of(&files);
-            future_to_promise(async move { Ok(to_js(&crate::import::import_files(files).await)) })
+            // `{keep: false}`: the caller already keeps the files on disk, so do not copy them to OPFS again.
+            let keep = js_sys::Reflect::get(&options, &"keep".into()).ok().and_then(|v| v.as_bool()).unwrap_or(true);
+            future_to_promise(async move { Ok(to_js(&crate::import::import_files(files, keep).await)) })
         })
         .into_js_value(),
     )?;
@@ -210,7 +212,7 @@ pub fn install() -> Result<(), JsValue> {
         Closure::<dyn Fn(String, JsValue) -> js_sys::Promise>::new(|url: String, name: JsValue| {
             future_to_promise(caught(async move {
                 let f = fetch_file(&url, name.as_string()).await?;
-                Ok(to_js(&crate::import::import_files(vec![f]).await))
+                Ok(to_js(&crate::import::import_files(vec![f], true).await))
             }))
         })
         .into_js_value(),

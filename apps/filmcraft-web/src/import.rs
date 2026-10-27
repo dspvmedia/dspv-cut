@@ -103,8 +103,9 @@ async fn import_path(path: String, bin: u64) -> Result<Value, String> {
     Err(format!("{path}: timed out loading the file"))
 }
 
-/// Import browser files (no copies): returns `{items, errors, paths}`.
-pub async fn import_files(files: Vec<web_sys::File>) -> Value {
+/// Import browser files (no copies): returns `{items, errors, paths}`. `keep` also copies each file to OPFS so a reload can find it again
+/// (the page around the editor says no for files it keeps on disk itself, see `importFiles` in api.rs).
+pub async fn import_files(files: Vec<web_sys::File>, keep: bool) -> Value {
     // Capture once per batch: navigation while prewarming must not redirect pending imports.
     let bin = on_ui(|w, _| w.app.import_bin().0).await;
     let mut items = Vec::new();
@@ -119,7 +120,9 @@ pub async fn import_files(files: Vec<web_sys::File>) -> Value {
             Ok(v) => {
                 items.extend(v.get("items").and_then(Value::as_array).cloned().unwrap_or_default());
                 errors.extend(v.get("errors").and_then(Value::as_array).cloned().unwrap_or_default());
-                crate::recovery::keep_media(&path, &f);
+                if keep {
+                    crate::recovery::keep_media(&path, &f);
+                }
             }
             Err(e) => errors.push(json!(e)),
         }
@@ -150,7 +153,7 @@ pub fn take_files(files: Vec<web_sys::File>) {
             }
         }
         if !media.is_empty() {
-            import_files(media).await;
+            import_files(media, true).await;
         }
     });
 }
