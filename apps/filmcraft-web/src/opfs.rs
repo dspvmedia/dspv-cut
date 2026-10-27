@@ -130,6 +130,12 @@ pub async fn store_blob(rel: &str, blob: &web_sys::Blob) -> Result<(), JsValue> 
     Ok(())
 }
 
+/// A file kept in OPFS, as a `File` the browser reads from disk (None when missing).
+pub async fn file(rel: &str) -> Option<web_sys::File> {
+    let fh = file_handle(rel, false).await.ok()?;
+    JsFuture::from(fh.get_file()).await.ok()?.dyn_into().ok()
+}
+
 /// The files in an OPFS directory: (name, File).
 pub async fn files_in(dir_rel: &str) -> Vec<(String, web_sys::File)> {
     let mut out = Vec::new();

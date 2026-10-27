@@ -9,6 +9,7 @@
 //!   A skipped snapshot stays dirty until this session writes its own ([`crate::recovery_policy`]).
 
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::rc::Rc;
 
 use filmcraft_engine::Session;
@@ -97,17 +98,41 @@ pub async fn load_snapshot() -> Option<(String, Vec<u8>)> {
     Some((format!("{name}.fcproj"), bytes))
 }
 
-/// Keep a copy of an imported file in OPFS (background).
+thread_local! {
+    /// Imported files waiting to be copied to OPFS, and whether the copier is running.
+    static KEEP: RefCell<(VecDeque<(String, web_sys::File)>, bool)> = const { RefCell::new((VecDeque::new(), false)) };
+}
+
+/// Keep a copy of an imported file in OPFS (background, one file at a time). Once the copy is on disk the file is read from there:
+/// a clip downloaded by the page is an in-memory Blob that stays in memory for as long as the editor holds it, so without the swap
+/// every clip of a big project stays in RAM and the page runs out of memory (about 2 to 3 GB of footage).
 pub fn keep_media(path: &str, file: &web_sys::File) {
     if !opfs::available() || file.size() > KEEP_MAX {
         return;
     }
-    let Some(name) = path.strip_prefix("/files/").map(str::to_string) else { return };
-    let blob: web_sys::Blob = file.clone().into();
+    if !path.starts_with("/files/") {
+        return;
+    }
+    KEEP.with(|k| k.borrow_mut().0.push_back((path.to_string(), file.clone())));
+    let start = KEEP.with(|k| !std::mem::replace(&mut k.borrow_mut().1, true));
+    if !start {
+        return;
+    }
     wasm_bindgen_futures::spawn_local(async move {
-        if let Err(e) = opfs::store_blob(&format!("media/{name}"), &blob).await {
-            log::warn!("keeping {name} in OPFS: {e:?}");
+        while let Some((path, file)) = KEEP.with(|k| k.borrow_mut().0.pop_front()) {
+            let Some(name) = path.strip_prefix("/files/") else { continue };
+            let rel = format!("media/{name}");
+            let blob: web_sys::Blob = file.into();
+            match opfs::store_blob(&rel, &blob).await {
+                Ok(()) => {
+                    if let Some(kept) = opfs::file(&rel).await {
+                        crate::fs::replace_blob(&path, kept.into());
+                    }
+                }
+                Err(e) => log::warn!("keeping {name} in OPFS: {e:?}"),
+            }
         }
+        KEEP.with(|k| k.borrow_mut().1 = false);
     });
 }
 

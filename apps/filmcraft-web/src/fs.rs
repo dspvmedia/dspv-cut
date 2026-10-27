@@ -45,6 +45,8 @@ struct Fs {
     bytes: usize,
     clock: u64,
     inflight: HashSet<(u32, u64)>,
+    /// Blobs swapped for a file-backed copy (see [`replace_blob`]).
+    on_disk: usize,
     failed: HashMap<(u32, u64), String>,
     /// Called when fetched bytes arrive (repaint the UI so pending frames are retried).
     on_data: Option<Rc<dyn Fn()>>,
@@ -138,6 +140,26 @@ pub fn bytes_to_blob(b: &[u8], mime: &str) -> Result<web_sys::Blob, wasm_bindgen
     let opts = web_sys::BlobPropertyBag::new();
     opts.set_type(mime);
     web_sys::Blob::new_with_u8_array_sequence_and_options(&arr, &opts)
+}
+
+/// Point an imported file at a different Blob holding the same bytes. The browser keeps a downloaded Blob in memory for as long as
+/// anything refers to it, so a file kept in OPFS is swapped in for it: the same bytes, read back from disk on demand. Ignored when the
+/// path is gone or the sizes differ.
+pub fn replace_blob(path: &str, blob: web_sys::Blob) {
+    FS.with(|fs| {
+        let mut fs = fs.borrow_mut();
+        let Some(&Entry::Blob { id, size }) = fs.entries.get(path) else { return };
+        if blob.size() as u64 != size {
+            return;
+        }
+        fs.blobs.insert(id, blob);
+        fs.on_disk += 1;
+    });
+}
+
+/// Imported files now read from disk instead of memory.
+pub fn on_disk() -> usize {
+    FS.with(|fs| fs.borrow().on_disk)
 }
 
 /// Fetches still running.

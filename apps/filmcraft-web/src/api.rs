@@ -155,6 +155,7 @@ pub fn install() -> Result<(), JsValue> {
             let mut v = crate::info();
             v["webcodecsStats"] = crate::webcodecs::stats();
             v["fetchesInFlight"] = json!(crate::fs::inflight());
+            v["mediaOnDisk"] = json!(crate::fs::on_disk());
             // the wasm heap (a 32-bit address space: 4 GiB is the ceiling)
             v["wasmMemoryBytes"] = js_sys::Reflect::get(&wasm_bindgen::memory(), &"buffer".into())
                 .ok()
