@@ -111,6 +111,31 @@ fn wav_resolve_honours_explicit_sample_rates() {
     }
 }
 
+/// DSPV: a sequence that shows captions burns them in unless the call chooses otherwise (2026-10-27: a social export lost its captions).
+#[test]
+fn visible_captions_burn_in_unless_the_export_says_otherwise() {
+    let burns = |s: &mut Session, extra: Value| {
+        let mut params = json!({"format":"h264"});
+        params.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        s.execute("export.resolve", params).unwrap()["settings"]["burnCaptions"].as_bool().unwrap()
+    };
+    let mut s = demo();
+    assert!(!burns(&mut s, json!({})), "no caption track: nothing to burn");
+    s.execute("captions.newTrack", json!({})).unwrap();
+    assert!(!burns(&mut s, json!({})), "a caption track with no captions: nothing to burn");
+    s.execute("captions.add", json!({"text":"Arrive early", "seconds":0.0, "durationSeconds":1.0})).unwrap();
+    assert!(burns(&mut s, json!({})), "a visible caption track with captions burns in by default");
+    assert!(burns(&mut s, json!({"preset":"High Quality 1080p HD"})), "a preset that says nothing about captions too");
+    assert!(!burns(&mut s, json!({"burnCaptions":false})), "an explicit no is kept");
+    assert!(!burns(&mut s, json!({"settings":{"burnCaptions":false}})), "an explicit no inside settings is kept");
+    assert!(!burns(&mut s, json!({"captionSidecar":"srt"})), "a sidecar request is a caption choice");
+    assert!(burns(&mut s, json!({"burnCaptions":true})));
+    let queued = s.execute("export.queue.add", json!({"format":"h264", "path":"/tmp/q.mp4"})).unwrap();
+    assert!(s.export_queue.items.last().is_some_and(|i| i.settings.burn_captions), "the queue too: {queued}");
+    s.execute("captions.hideAll", json!({})).unwrap();
+    assert!(!burns(&mut s, json!({})), "hidden caption tracks are not burned in");
+}
+
 #[test]
 fn nested_camel_case_settings_are_honoured() {
     let mut s = demo();

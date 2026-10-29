@@ -15,6 +15,7 @@ use filmcraft_engine::Session;
 use serde_json::{Value, json};
 
 use crate::opfs;
+use crate::recovery_guard::{self, Start};
 use crate::recovery_policy::{Action, Policy};
 
 const SNAPSHOT: &str = "recovery/snapshot.fcproj";
@@ -118,4 +119,72 @@ pub async fn restore_media() -> usize {
         crate::fs::register_blob(&name, f.into());
     }
     n
+}
+
+/// What start-up found in OPFS.
+pub struct Startup {
+    /// Media copies registered.
+    pub restored: usize,
+    /// The unsaved snapshot to reopen: (file name, bytes).
+    pub recovered: Option<(String, Vec<u8>)>,
+    /// Said to the user when an autosave was put aside instead of reopened.
+    pub skipped: Option<String>,
+}
+
+fn storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok()?
+}
+
+fn marker_set() -> bool {
+    storage().and_then(|s| s.get_item(recovery_guard::KEY).ok()).flatten().is_some()
+}
+
+fn set_marker() {
+    if let Some(s) = storage() {
+        let _ = s.set_item(recovery_guard::KEY, &js_sys::Date::now().to_string());
+    }
+}
+
+fn clear_marker() {
+    if let Some(s) = storage() {
+        let _ = s.remove_item(recovery_guard::KEY);
+    }
+}
+
+/// Decide what to reopen (see [`recovery_guard`]). Reopening an autosave sets a `localStorage` marker that is removed once the editor
+/// has stayed up; a start that finds the marker still set puts the autosave aside (still downloadable through
+/// `filmcraft.crashedSnapshot()`) and starts clean, so an autosave that crashes the page cannot do it again on every reload.
+pub async fn startup(no_recover: bool, force: bool) -> Startup {
+    let none = Startup { restored: 0, recovered: None, skipped: None };
+    if !opfs::available() {
+        return none;
+    }
+    match recovery_guard::start(marker_set(), no_recover, force) {
+        Start::Skip => none,
+        Start::SkipCrashed => {
+            clear_marker();
+            let Some((name, bytes)) = load_snapshot().await else { return none };
+            opfs::write(recovery_guard::ASIDE.into(), bytes);
+            opfs::write(META.into(), json!({"dirty": false, "crashedName": name}).to_string().into_bytes());
+            let note = format!("The last autosave of {name} stopped the editor when it was reopened, so it was not reopened. It is kept in this browser.");
+            Startup { skipped: Some(note), ..none }
+        }
+        Start::Recover => {
+            let recovered = load_snapshot().await;
+            if recovered.is_none() {
+                return Startup { restored: restore_media().await, ..none };
+            }
+            set_marker();
+            wasm_bindgen_futures::spawn_local(async {
+                crate::fs::sleep((recovery_guard::SETTLE_S * 1000.0) as i32).await;
+                clear_marker();
+            });
+            Startup { restored: restore_media().await, recovered, skipped: None }
+        }
+    }
+}
+
+/// The autosave that was put aside by [`startup`], if any.
+pub async fn crashed_snapshot() -> Option<Vec<u8>> {
+    opfs::read(recovery_guard::ASIDE).await
 }

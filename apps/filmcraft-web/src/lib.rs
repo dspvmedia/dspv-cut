@@ -20,6 +20,7 @@
 
 pub mod api;
 pub mod audio;
+pub mod decode_budget;
 pub mod download_pacing;
 pub mod fs;
 pub mod host;
@@ -27,6 +28,7 @@ pub mod host_save;
 pub mod import;
 pub mod opfs;
 pub mod recovery;
+pub mod recovery_guard;
 pub mod recovery_policy;
 pub mod webcodecs;
 
@@ -138,9 +140,9 @@ pub async fn start(canvas_id: String) -> Result<(), JsValue> {
     set_info("frameWorkers", json!("cooperative"));
     set_info("opfs", json!(opfs::available()));
 
-    // Media kept in OPFS by earlier sessions come back under their paths (recovery).
-    let restored = if opfs::available() && !query_flag("fresh") { recovery::restore_media().await } else { 0 };
-    let recovered = if query_flag("fresh") || query_flag("norecover") { None } else { recovery::load_snapshot().await };
+    // Media kept in OPFS by earlier sessions come back under their paths (recovery), unless the last attempt to reopen
+    // the autosave did not survive (`recovery_guard`).
+    let recovery::Startup { restored, recovered, skipped } = recovery::startup(query_flag("fresh") || query_flag("norecover"), query_flag("recoverforce")).await;
     webcodecs::probe().await;
 
     api::install()?;
@@ -176,6 +178,9 @@ pub async fn start(canvas_id: String) -> Result<(), JsValue> {
                 webcodecs::install();
                 let mut session = Session::new(Arc::new(fs::WebServices));
                 let mut toast = None;
+                if let Some(note) = &skipped {
+                    toast = Some(note.clone());
+                }
                 if let Some((name, bytes)) = recovered {
                     let path = format!("/recovered/{name}");
                     fs::put(&path, bytes);

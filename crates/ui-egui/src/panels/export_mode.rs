@@ -59,6 +59,8 @@ pub struct ExportUi {
     pub quick_open: bool,
     pub quick_path: String,
     pub quick_preset: String,
+    /// DSPV: Captions ▸ Export Options was picked by hand. Until then it follows the sequence: burned in when a caption track shows.
+    pub captions_chosen: bool,
 }
 
 impl Default for ExportUi {
@@ -78,6 +80,7 @@ impl Default for ExportUi {
             quick_open: false,
             quick_path: String::new(),
             quick_preset: String::new(),
+            captions_chosen: false,
         }
     }
 }
@@ -456,6 +459,7 @@ fn settings_column(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
         .map(|q| (q.settings.width, q.settings.height, q.settings.frame_rate, q.settings.sample_rate))
         .unwrap_or((1920, 1080, FrameRate::FPS_24, 48_000));
     let has_captions = app.session.active_sequence().is_some_and(|q| !q.caption_tracks.is_empty());
+    let shows_captions = app.session.active_sequence().is_some_and(filmcraft_engine::export_tools::shows_captions);
     // an HDR sequence exports HDR (H.265 Main 10 where the hardware encoder has it) unless SDR is asked for
     let seq_hdr = app.session.active_sequence().is_some_and(|q| q.settings.color.working.is_hdr());
     let all_presets = app.session.export_presets.all();
@@ -464,6 +468,11 @@ fn settings_column(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
     let mut pick_overlay = false;
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(vec2(14.0, 10.0))).id_salt("export-settings"));
     let ex = &mut app.ui.export;
+    // DSPV: captions you can see are captions you export, until Captions ▸ Export Options is picked by hand (presets and format switches
+    // start from burn-in off, so this is applied every frame, not once).
+    if !ex.captions_chosen && ex.settings.caption_sidecar.is_none() {
+        ex.settings.burn_captions = shows_captions;
+    }
     egui::ScrollArea::vertical().id_salt("export-settings-scroll").auto_shrink([false, false]).show(&mut child, |ui| {
         ui.label(egui::RichText::new(tl!("Media File")).strong().size(14.0));
         ui.add_space(6.0);
@@ -574,6 +583,7 @@ fn settings_column(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
                     modes[0]
                 };
                 if let Some(i) = combo(ui, &mut reg, "export.captions.mode", cur, &opts(&modes), 220.0) {
+                    ex.captions_chosen = true;
                     s.burn_captions = i == 1;
                     s.caption_sidecar = (i == 2).then(|| s.caption_sidecar.clone().unwrap_or_else(|| "srt".into()));
                 }

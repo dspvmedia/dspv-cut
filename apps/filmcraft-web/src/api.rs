@@ -12,6 +12,7 @@
 //! await filmcraft.importFiles(input.files)                 // File / FileList / File[]
 //! await filmcraft.openProject(file)                        // .fcproj File or URL
 //! filmcraft.files(); await filmcraft.readFile("/exports/a.mp4"); filmcraft.info()
+//! await filmcraft.crashedSnapshot()                        // the autosave put aside after it crashed a reload (bytes or null)
 //! ```
 //!
 //! Results resolve with the method's `result`; errors reject with the error message.
@@ -154,6 +155,12 @@ pub fn install() -> Result<(), JsValue> {
             let mut v = crate::info();
             v["webcodecsStats"] = crate::webcodecs::stats();
             v["fetchesInFlight"] = json!(crate::fs::inflight());
+            // the wasm heap (a 32-bit address space: 4 GiB is the ceiling)
+            v["wasmMemoryBytes"] = js_sys::Reflect::get(&wasm_bindgen::memory(), &"buffer".into())
+                .ok()
+                .and_then(|b| js_sys::Reflect::get(&b, &"byteLength".into()).ok())
+                .and_then(|n| n.as_f64())
+                .map_or(Value::Null, |n| json!(n));
             to_js(&v)
         })
         .into_js_value(),
@@ -180,10 +187,22 @@ pub fn install() -> Result<(), JsValue> {
     )?;
     set_fn(
         &obj,
+        "crashedSnapshot",
+        Closure::<dyn Fn() -> js_sys::Promise>::new(|| {
+            future_to_promise(caught(async move {
+                Ok(crate::recovery::crashed_snapshot().await.map_or(JsValue::NULL, |b| js_sys::Uint8Array::from(&b[..]).into()))
+            }))
+        })
+        .into_js_value(),
+    )?;
+    set_fn(
+        &obj,
         "importFiles",
-        Closure::<dyn Fn(JsValue) -> js_sys::Promise>::new(|files: JsValue| {
+        Closure::<dyn Fn(JsValue, JsValue) -> js_sys::Promise>::new(|files: JsValue, options: JsValue| {
             let files = files_of(&files);
-            future_to_promise(async move { Ok(to_js(&crate::import::import_files(files).await)) })
+            // `{keep: false}`: the caller already keeps the files on disk, so do not copy them to OPFS again.
+            let keep = js_sys::Reflect::get(&options, &"keep".into()).ok().and_then(|v| v.as_bool()).unwrap_or(true);
+            future_to_promise(async move { Ok(to_js(&crate::import::import_files(files, keep).await)) })
         })
         .into_js_value(),
     )?;
@@ -193,7 +212,7 @@ pub fn install() -> Result<(), JsValue> {
         Closure::<dyn Fn(String, JsValue) -> js_sys::Promise>::new(|url: String, name: JsValue| {
             future_to_promise(caught(async move {
                 let f = fetch_file(&url, name.as_string()).await?;
-                Ok(to_js(&crate::import::import_files(vec![f]).await))
+                Ok(to_js(&crate::import::import_files(vec![f], true).await))
             }))
         })
         .into_js_value(),
