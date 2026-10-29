@@ -1,7 +1,9 @@
 //! The shared decoder and picture budgets. They are pure, so they run natively even though the rest of the
 //! crate is wasm32-only.
 
+// The crate uses the module's limits; this test reaches the rest of it.
 #[path = "../src/decode_budget.rs"]
+#[allow(dead_code)]
 mod decode_budget;
 
 use decode_budget::{FRAMES_PER_SOURCE, FrameCache, Open, pick_victim};

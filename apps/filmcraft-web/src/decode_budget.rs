@@ -81,12 +81,7 @@ impl<V: Clone> FrameCache<V> {
 
     fn trim_source(&mut self, source: u32, want: i64, keep: (u32, i64)) {
         while self.count(source) > FRAMES_PER_SOURCE {
-            let far = self
-                .map
-                .range((source, i64::MIN)..=(source, i64::MAX))
-                .map(|(k, _)| *k)
-                .filter(|k| *k != keep)
-                .max_by_key(|k| (k.1 - want).abs());
+            let far = self.map.range((source, i64::MIN)..=(source, i64::MAX)).map(|(k, _)| *k).filter(|k| *k != keep).max_by_key(|k| (k.1 - want).abs());
             let Some(far) = far else { break };
             self.remove(far);
         }

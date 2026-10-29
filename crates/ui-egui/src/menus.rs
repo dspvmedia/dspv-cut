@@ -909,6 +909,24 @@ pub fn external_commands() -> Vec<filmcraft_engine::shortcuts::CommandInfo> {
 
 /// Draw the in-window menu bar.
 pub fn menu_bar(app: &mut FilmcraftApp, ui: &mut egui::Ui) {
+    draw_menu_bar(app, ui, false);
+}
+
+/// The menu bar folded into one Menu button, its menus as submenus: for a window too narrow for the
+/// titles side by side (an iPad held upright).
+pub fn menu_bar_compact(app: &mut FilmcraftApp, ui: &mut egui::Ui) {
+    draw_menu_bar(app, ui, true);
+}
+
+/// How wide the menu bar's titles are side by side, in points.
+pub fn menu_bar_width(app: &FilmcraftApp, ui: &egui::Ui) -> f32 {
+    let style = ui.style();
+    let pad = 2.0 * style.spacing.button_padding.x + style.spacing.item_spacing.x;
+    let font = egui::TextStyle::Button.resolve(style);
+    MENUS.iter().map(|top| ui.painter().layout_no_wrap(app.ui.language.tr(top).to_string(), font.clone(), egui::Color32::WHITE).size().x + pad).sum()
+}
+
+fn draw_menu_bar(app: &mut FilmcraftApp, ui: &mut egui::Ui, compact: bool) {
     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("interface-language"), app.ui.language));
     let items = menu_items(app);
     // Draw Edit ▸ Label with the user's live palette, not the baked-in label colours.
@@ -916,24 +934,44 @@ pub fn menu_bar(app: &mut FilmcraftApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     let mut clicked: Option<String> = None;
     egui::MenuBar::new().config(egui::containers::menu::MenuConfig::new().style(crate::theme::menu_style)).ui(ui, |ui| {
-        let mut titles = Vec::with_capacity(MENUS.len());
-        for top in MENUS {
-            let mine: Vec<&MenuItem> = items.iter().filter(|i| i.path.first().map(String::as_str) == Some(top)).collect();
-            let r = ui.menu_button(app.ui.language.tr(top), |ui| {
-                ui.set_min_width(260.0);
-                if mine.is_empty() {
-                    ui.add_enabled(false, egui::Button::new(tl!("(empty)")));
-                }
-                menu_level(ui, &mine, 1, &mut clicked, &mut app.auto, &labels);
+        if compact {
+            let r = ui.menu_button(tl!("☰ Menu"), |ui| {
+                ui.set_min_width(200.0);
+                top_menus(app, ui, &items, &labels, &mut clicked);
             });
-            app.auto.add(&format!("menu.{top}"), r.response.rect, top);
-            titles.push(r.response);
+            app.auto.add("menu.compact", r.response.rect, "Menu");
+        } else {
+            let titles = top_menus(app, ui, &items, &labels, &mut clicked);
+            switch_on_hover(ui.ctx(), &titles);
         }
-        switch_on_hover(ui.ctx(), &titles);
     });
     if let Some(id) = clicked {
         let _ = invoke(app, &ctx, &id, json!({}));
     }
+}
+
+/// One menu button per top-level menu (in a bar, or nested as submenus in the compact Menu).
+fn top_menus(
+    app: &mut FilmcraftApp,
+    ui: &mut egui::Ui,
+    items: &[MenuItem],
+    labels: &filmcraft_engine::settings::LabelPrefs,
+    clicked: &mut Option<String>,
+) -> Vec<egui::Response> {
+    let mut titles = Vec::with_capacity(MENUS.len());
+    for top in MENUS {
+        let mine: Vec<&MenuItem> = items.iter().filter(|i| i.path.first().map(String::as_str) == Some(top)).collect();
+        let r = ui.menu_button(app.ui.language.tr(top), |ui| {
+            ui.set_min_width(260.0);
+            if mine.is_empty() {
+                ui.add_enabled(false, egui::Button::new(tl!("(empty)")));
+            }
+            menu_level(ui, &mine, 1, clicked, &mut app.auto, labels);
+        });
+        app.auto.add(&format!("menu.{top}"), r.response.rect, top);
+        titles.push(r.response);
+    }
+    titles
 }
 
 /// Like a native menu bar (Windows, macOS): while one top-level menu is open, hovering another
