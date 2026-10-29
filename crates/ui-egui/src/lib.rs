@@ -1828,7 +1828,9 @@ impl FilmcraftApp {
                 }
                 ctx.data_mut(|d| d.insert_temp(warned_key, false));
             } else if !warned {
-                self.ui.status = tl!("This project was saved somewhere else. Your unsaved edits are kept here; saving replaces the other version (File ▸ Revert loads it)").into();
+                self.ui.status =
+                    tl!("This project was saved somewhere else. Your unsaved edits are kept here; saving replaces the other version (File ▸ Revert loads it)")
+                        .into();
                 ctx.data_mut(|d| d.insert_temp(warned_key, true));
             }
         }
@@ -2004,7 +2006,7 @@ impl FilmcraftApp {
 
     /// Contextual hint for the status bar (Premiere shows tool/gesture hints here).
     fn hint_text(&self) -> String {
-        let mac = cfg!(target_os = "macos");
+        let mac = cfg!(any(target_os = "macos", target_os = "ios"));
         match self.ui.tool {
             state::Tool::Selection if mac => {
                 tl!("Click to select, or click in empty space and drag to marquee select. Use Shift, Opt, and Cmd for other options.")

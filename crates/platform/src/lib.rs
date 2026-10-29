@@ -35,7 +35,7 @@ mod annexb;
 #[cfg_attr(not(any(target_os = "windows", target_os = "linux")), allow(dead_code))]
 mod biplanar;
 pub mod cursor;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub mod hardware_encode;
 pub mod hybrid;
 #[cfg(target_os = "windows")]
@@ -46,10 +46,10 @@ pub mod nvdec;
 pub mod nvenc;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub mod vaapi;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 #[allow(unsafe_code)]
 pub mod videotoolbox;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 #[allow(unsafe_code)]
 pub mod videotoolbox_encode;
 
@@ -70,7 +70,7 @@ pub enum Availability {
 pub fn register() -> Availability {
     #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
     filmcraft_export::register_encoder(nvenc::export::factory);
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         filmcraft_codecs::register_video_decoder(videotoolbox_factory);
         filmcraft_export::register_encoder(hardware_encode::videotoolbox_encoder_factory);
@@ -132,7 +132,7 @@ pub fn register() -> Availability {
         }
         available
     }
-    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows", target_os = "linux")))]
     {
         Availability::Unavailable("no hardware video decoder for this system yet")
     }
@@ -140,7 +140,7 @@ pub fn register() -> Availability {
 
 /// Whether [`register`] has put a hardware decoder factory in front of our decoders.
 pub fn registered() -> bool {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         filmcraft_codecs::video_decoder_registered(videotoolbox_factory)
     }
@@ -156,7 +156,7 @@ pub fn registered() -> bool {
         }
         filmcraft_codecs::video_decoder_registered(vaapi_factory)
     }
-    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows", target_os = "linux")))]
     {
         false
     }
@@ -165,7 +165,7 @@ pub fn registered() -> bool {
 /// Whether this system's hardware decoder takes the stream of `entry` (whatever the Hardware
 /// decoding setting says): diagnostics and tests.
 pub fn hardware_decoder_for(entry: &filmcraft_isobmff::SampleEntry) -> bool {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         filmcraft_codecs::hw::NalStreamInfo::from_entry(entry).and_then(|r| r.ok()).is_some_and(|info| videotoolbox::VtDecoder::new(info).is_ok())
     }
@@ -183,7 +183,7 @@ pub fn hardware_decoder_for(entry: &filmcraft_isobmff::SampleEntry) -> bool {
             vaapi::VaDecoder::new(info).is_ok()
         })
     }
-    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows", target_os = "linux")))]
     {
         let _ = entry;
         false
@@ -192,7 +192,7 @@ pub fn hardware_decoder_for(entry: &filmcraft_isobmff::SampleEntry) -> bool {
 
 /// The VideoToolbox factory: a [`HybridDecoder`] around [`videotoolbox::VtDecoder`] for `avcC` /
 /// `hvcC` streams VideoToolbox can decode in hardware, `None` otherwise.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub fn videotoolbox_factory(entry: &filmcraft_isobmff::SampleEntry) -> Option<filmcraft_codecs::Result<Box<dyn filmcraft_codecs::VideoDecoder>>> {
     if !filmcraft_codecs::hw::hardware_decoding() {
         return None;
