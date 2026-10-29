@@ -69,14 +69,20 @@ fn err(e: impl std::fmt::Display) -> Outcome {
 fn modifiers(p: &Value) -> egui::Modifiers {
     let m = p.get("modifiers").unwrap_or(p);
     let b = |k: &str| m.get(k).and_then(Value::as_bool).unwrap_or(false);
-    as_pressed(egui::Modifiers { alt: b("alt"), ctrl: b("ctrl"), shift: b("shift"), mac_cmd: cfg!(target_os = "macos") && b("command"), command: b("command") })
+    as_pressed(egui::Modifiers {
+        alt: b("alt"),
+        ctrl: b("ctrl"),
+        shift: b("shift"),
+        mac_cmd: cfg!(any(target_os = "macos", target_os = "ios")) && b("command"),
+        command: b("command"),
+    })
 }
 
 /// `m` as egui-winit reports a physical press: off macOS Control is the primary modifier, so
 /// `ctrl` and `command` are one key and a press of either carries both. A synthetic `Ctrl+Z` then
 /// matches a `Cmd+Z` binding exactly as the real key does (#245).
 fn as_pressed(mut m: egui::Modifiers) -> egui::Modifiers {
-    if !cfg!(target_os = "macos") && (m.ctrl || m.command) {
+    if !cfg!(any(target_os = "macos", target_os = "ios")) && (m.ctrl || m.command) {
         m.ctrl = true;
         m.command = true;
     }

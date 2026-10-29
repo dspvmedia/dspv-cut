@@ -68,7 +68,7 @@ fn egui_key(name: &str) -> Option<egui::Key> {
 /// Canonical chord text from an egui key event.
 pub fn chord_of(key: egui::Key, m: egui::Modifiers) -> Option<String> {
     let name = KEYS.iter().find(|k| egui_key(k) == Some(key))?;
-    let mods = Mods { cmd: m.command || m.mac_cmd, ctrl: m.ctrl && cfg!(target_os = "macos"), alt: m.alt, shift: m.shift };
+    let mods = Mods { cmd: m.command || m.mac_cmd, ctrl: m.ctrl && cfg!(any(target_os = "macos", target_os = "ios")), alt: m.alt, shift: m.shift };
     Some(format!("{}{}", mods.prefix(), name))
 }
 
@@ -256,7 +256,11 @@ fn header(app: &mut FilmcraftApp, ui: &mut egui::Ui, t: &Tokens) {
             });
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(RichText::new(if cfg!(target_os = "macos") { tl!("Keyboard: US (macOS)") } else { tl!("Keyboard: US") }).size(12.0).color(t.text_dim));
+            ui.label(
+                RichText::new(if cfg!(any(target_os = "macos", target_os = "ios")) { tl!("Keyboard: US (macOS)") } else { tl!("Keyboard: US") })
+                    .size(12.0)
+                    .color(t.text_dim),
+            );
         });
     });
     if let Some(mut name) = app.shortcut_editor.save_name.clone() {
@@ -446,7 +450,7 @@ fn key_legend(name: &str, mac: bool) -> String {
 }
 
 fn keyboard(app: &mut FilmcraftApp, ui: &mut egui::Ui, area: Rect, t: &Tokens) {
-    let mac = cfg!(target_os = "macos");
+    let mac = cfg!(any(target_os = "macos", target_os = "ios"));
     // held modifiers count as the filter too (outside recording)
     let held = ui.input(|i| i.modifiers);
     let mut mods = app.shortcut_editor.mods;

@@ -821,7 +821,7 @@ pub fn parse_shortcut(s: &str) -> Option<(egui::Modifiers, egui::Key)> {
     let mut m = egui::Modifiers::NONE;
     let mut key = None;
     let parts: Vec<&str> = if s == "+" { vec!["+"] } else { s.split('+').collect() };
-    let mac = cfg!(target_os = "macos");
+    let mac = cfg!(any(target_os = "macos", target_os = "ios"));
     for p in parts {
         match p {
             "Cmd" => m.command = true,
@@ -1071,7 +1071,7 @@ mod parse_shortcut_tests {
         let (ctrl, k) = parse_shortcut("Ctrl+Z").unwrap();
         let (cmd, k2) = parse_shortcut("Cmd+Z").unwrap();
         assert_eq!((k, k2), (egui::Key::Z, egui::Key::Z));
-        if cfg!(target_os = "macos") {
+        if cfg!(any(target_os = "macos", target_os = "ios")) {
             assert_eq!((ctrl.ctrl, ctrl.command), (true, false));
             assert_eq!((cmd.ctrl, cmd.command), (false, true));
             assert!(!ctrl.matches_logically(cmd) && !cmd.matches_logically(ctrl), "two different keys on a Mac");

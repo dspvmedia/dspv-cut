@@ -154,7 +154,7 @@ pub enum Platform {
 
 impl Platform {
     pub fn current() -> Self {
-        if cfg!(target_os = "macos") {
+        if cfg!(any(target_os = "macos", target_os = "ios")) {
             Platform::Mac
         } else if cfg!(windows) {
             Platform::Windows
