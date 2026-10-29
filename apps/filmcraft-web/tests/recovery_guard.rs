@@ -1,6 +1,8 @@
 //! The crash-loop guard's decision. It is pure, so it runs natively even though the rest of the crate is wasm32-only.
 
+// The crate uses the module's constants; this test reaches the rest of it.
 #[path = "../src/recovery_guard.rs"]
+#[allow(dead_code)]
 mod recovery_guard;
 
 use recovery_guard::{Start, start};

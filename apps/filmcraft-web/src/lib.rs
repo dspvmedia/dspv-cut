@@ -142,7 +142,8 @@ pub async fn start(canvas_id: String) -> Result<(), JsValue> {
 
     // Media kept in OPFS by earlier sessions come back under their paths (recovery), unless the last attempt to reopen
     // the autosave did not survive (`recovery_guard`).
-    let recovery::Startup { restored, recovered, skipped } = recovery::startup(query_flag("fresh") || query_flag("norecover"), query_flag("recoverforce")).await;
+    let recovery::Startup { restored, recovered, skipped } =
+        recovery::startup(query_flag("fresh") || query_flag("norecover"), query_flag("recoverforce")).await;
     webcodecs::probe().await;
 
     api::install()?;
