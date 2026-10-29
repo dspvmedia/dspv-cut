@@ -153,7 +153,11 @@ fn unsaved_edits_are_never_replaced_by_a_save_made_elsewhere() {
     save_elsewhere(&path);
     for _ in 0..2 {
         let r = s.reload_if_changed_on_disk().unwrap();
-        assert_eq!((r["changed"].clone(), r["reloaded"].clone(), r["dirty"].clone()), (json!(true), json!(false), json!(true)), "still reported until resolved");
+        assert_eq!(
+            (r["changed"].clone(), r["reloaded"].clone(), r["dirty"].clone()),
+            (json!(true), json!(false), json!(true)),
+            "still reported until resolved"
+        );
     }
     assert_eq!(*s.project, mine, "the unsaved edit is still here");
     // Revert takes the other save; after that the file is in step again.
