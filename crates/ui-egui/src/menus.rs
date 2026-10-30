@@ -963,10 +963,12 @@ fn top_menus(
         let mine: Vec<&MenuItem> = items.iter().filter(|i| i.path.first().map(String::as_str) == Some(top)).collect();
         let r = ui.menu_button(app.ui.language.tr(top), |ui| {
             ui.set_min_width(260.0);
-            if mine.is_empty() {
-                ui.add_enabled(false, egui::Button::new(tl!("(empty)")));
-            }
-            menu_level(ui, &mine, 1, clicked, &mut app.auto, labels);
+            scroll_if_tall(ui, top, |ui| {
+                if mine.is_empty() {
+                    ui.add_enabled(false, egui::Button::new(tl!("(empty)")));
+                }
+                menu_level(ui, &mine, 1, clicked, &mut app.auto, labels);
+            });
         });
         app.auto.add(&format!("menu.{top}"), r.response.rect, top);
         titles.push(r.response);
@@ -987,6 +989,13 @@ fn switch_on_hover(ctx: &egui::Context, titles: &[egui::Response]) {
         egui::Popup::open_id(ctx, ids[i]);
         ctx.request_repaint();
     }
+}
+
+/// A menu taller than the window scrolls instead of running off it: File has more items than a
+/// short window (an iPad held sideways) has room for, and the last ones could not be reached.
+fn scroll_if_tall(ui: &mut egui::Ui, id: &str, add: impl FnOnce(&mut egui::Ui)) {
+    let room = (ui.ctx().content_rect().height() - 24.0).max(120.0);
+    egui::ScrollArea::vertical().id_salt(("menu-scroll", id)).max_height(room).auto_shrink([true, true]).show(ui, add);
 }
 
 /// One menu level: items whose path ends here, and a submenu (at its first item's position) for
@@ -1010,7 +1019,7 @@ fn menu_level(
             let language = ui.ctx().data(|d| d.get_temp::<crate::i18n::Language>(egui::Id::new("interface-language"))).unwrap_or_default();
             ui.menu_button(language.tr(sub), |ui| {
                 ui.set_min_width(220.0);
-                menu_level(ui, &inner, depth + 1, clicked, auto, labels);
+                scroll_if_tall(ui, sub, |ui| menu_level(ui, &inner, depth + 1, clicked, auto, labels));
             });
         } else if menu_entry(ui, it, auto, labels) {
             *clicked = Some(it.id.clone());
