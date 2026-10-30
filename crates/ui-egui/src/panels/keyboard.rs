@@ -57,7 +57,8 @@ macro_rules! uic {
 /// Frontend commands added for keyboard parity. Panel-scoped keys are in the shortcut tables
 /// (`FILMCRAFT_PANEL`), so they have no application-wide default here.
 pub const COMMANDS: &[UiCommand] = &[
-    uic!("window.maximizeFrame", "Maximize or Restore Active Frame", [], Some("Shift+`")),
+    // In the Window menu as in Premiere (Window ▸ Maximize Frame), so it can be reached without a keyboard (an iPad).
+    uic!("window.maximizeFrame", "Maximize Frame", ["Window"], Some("Shift+`")),
     uic!("window.maximizeFrameUnderCursor", "Maximize or Restore Frame Under Cursor", [], Some("`")),
     uic!("window.toggleFullScreen", "Toggle Full Screen", [], Some("Ctrl+`")),
     uic!("window.nextPanel", "Select Next Panel", [], Some("Ctrl+Shift+.")),
