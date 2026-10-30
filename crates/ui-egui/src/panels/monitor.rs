@@ -981,7 +981,7 @@ fn transport(app: &mut FilmcraftApp, ui: &mut egui::Ui, row: Rect, which: Which)
     // roomy spacing when every button fits with it, tight spacing before any goes to the overflow menu
     let count = buttons.len() as f32;
     let gap = if count * TRANSPORT_BUTTON + (count - 1.0).max(0.0) * 6.0 <= available { 6.0 } else { 2.0 };
-    let Some(fit) = craft_ui::layout::fit_toolbar(&widths, available, gap, TRANSPORT_BUTTON) else {
+    let Some(mut fit) = craft_ui::layout::fit_toolbar(&widths, available, gap, TRANSPORT_BUTTON) else {
         ui.scope_builder(egui::UiBuilder::new().max_rect(Rect::from_min_max(row.min, pos2((row.right() - 30.0).max(row.left()), row.bottom()))), |ui| {
             egui::ScrollArea::horizontal().id_salt((prefix, "transport-scroll")).show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -996,6 +996,7 @@ fn transport(app: &mut FilmcraftApp, ui: &mut egui::Ui, row: Rect, which: Which)
         });
         return;
     };
+    keep_play_shown(&mut fit, &buttons);
     let pitch = TRANSPORT_BUTTON + gap;
     let total = fit.shown.len() as f32 * pitch - gap + if fit.overflow.is_empty() { 0.0 } else { pitch };
     let mut x = row.center().x - 15.0 - total.max(TRANSPORT_BUTTON) / 2.0;
@@ -1039,6 +1040,19 @@ fn transport(app: &mut FilmcraftApp, ui: &mut egui::Ui, row: Rect, which: Which)
             }
         });
     }
+}
+
+/// Play is the one transport button that never goes to the overflow menu: on a narrow monitor (an iPad held upright) it
+/// takes the last shown slot, and the button that was there goes to the menu. Shown buttons keep their order.
+fn keep_play_shown(fit: &mut craft_ui::layout::ToolbarFit, buttons: &[(Icon, &str, &str)]) {
+    let Some(play) = buttons.iter().position(|(_, command, _)| matches!(*command, "playback.toggle" | "source.playback.toggle")) else { return };
+    let Some(at) = fit.overflow.iter().position(|&index| index == play) else { return };
+    let Some((last, width)) = fit.shown.pop() else { return };
+    fit.overflow.remove(at);
+    fit.overflow.push(last);
+    fit.overflow.sort_unstable();
+    fit.shown.push((play, width));
+    fit.shown.sort_by_key(|&(index, _)| index);
 }
 
 fn transport_button(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect, prefix: &str, icon: Icon, command: &str, label: &str) -> bool {
@@ -1128,6 +1142,30 @@ fn source_nav(app: &mut FilmcraftApp, cmd: &str) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn play_stays_shown_when_the_monitor_is_too_narrow_for_every_button() {
+        let buttons = [
+            (Icon::Play, "markers.add", "Add Marker"),
+            (Icon::Play, "mark.in", "Mark In"),
+            (Icon::Play, "mark.out", "Mark Out"),
+            (Icon::Play, "playback.stepBack", "Step Back"),
+            (Icon::Play, "playback.toggle", "Play"),
+            (Icon::Play, "playback.stepForward", "Step Forward"),
+        ];
+        // Room for three buttons: Play (index 4) would be in the menu.
+        let mut fit = craft_ui::layout::ToolbarFit { shown: vec![(0, 32.0), (1, 32.0), (2, 32.0)], overflow: vec![3, 4, 5], overflow_width: 32.0 };
+        keep_play_shown(&mut fit, &buttons);
+        assert_eq!(fit.shown.iter().map(|&(i, _)| i).collect::<Vec<_>>(), vec![0, 1, 4]);
+        assert_eq!(fit.overflow, vec![2, 3, 5]);
+        // Already shown, or nothing shown at all: left alone.
+        let mut wide = craft_ui::layout::ToolbarFit { shown: vec![(4, 32.0)], overflow: vec![5], overflow_width: 32.0 };
+        keep_play_shown(&mut wide, &buttons);
+        assert_eq!(wide.shown, vec![(4, 32.0)]);
+        let mut none = craft_ui::layout::ToolbarFit { shown: vec![], overflow: vec![0, 4], overflow_width: 32.0 };
+        keep_play_shown(&mut none, &buttons);
+        assert_eq!(none.overflow, vec![0, 4]);
+    }
     use super::*;
     use crate::frames::Rgba;
 
