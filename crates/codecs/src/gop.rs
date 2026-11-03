@@ -430,6 +430,8 @@ pub struct GopCache {
     /// The container's clean aperture, cut from every frame before the rotation.
     crop: Option<Region>,
     budget: usize,
+    /// See [`FLOOR_BYTES`].
+    floor_bytes: usize,
 }
 
 /// The cache always has room for this many frames, whatever their size: a frame-threaded decoder
@@ -437,6 +439,19 @@ pub struct GopCache {
 /// of the playhead, so a byte budget alone would evict 4K frames before they are shown and force
 /// a re-decode from the keyframe.
 const MIN_FRAMES: usize = 64;
+
+/// [`MIN_FRAMES`] of 4K 10-bit pictures is about 1.6 GB, more than the whole [`FRAME_BUDGET`] and a
+/// third of what iPadOS lets an app hold: the frame floor stops growing at this many bytes...
+const FLOOR_BYTES: usize = 768 << 20;
+
+/// ...but never below this many frames, enough for a frame-threaded decoder running ahead of the
+/// frame it returns.
+const MIN_AHEAD: usize = 24;
+
+/// The bytes a cache may hold whatever its budget, for frames of `frame_bytes` each.
+fn floor(frame_bytes: usize, floor_bytes: usize) -> usize {
+    MIN_FRAMES.saturating_mul(frame_bytes).min(floor_bytes.max(MIN_AHEAD.saturating_mul(frame_bytes)))
+}
 
 /// A running decoder up to this many samples before the wanted sample's sync sample keeps going
 /// rather than restarting at the sync sample.
@@ -519,7 +534,7 @@ impl GopCache {
             pool: pool.clone(),
         });
         pool.register(&shared);
-        Self { shared, explicit_color, rotation: 0, crop: None, budget: 384 << 20 }
+        Self { shared, explicit_color, rotation: 0, crop: None, budget: 384 << 20, floor_bytes: FLOOR_BYTES }
     }
 
     /// Turn every decoded frame clockwise by `quarter_turns` × 90° (the container's display
@@ -563,7 +578,7 @@ impl GopCache {
         } else {
             st.drafts.remove(&pts);
         }
-        let budget = self.budget.max(MIN_FRAMES * f.byte_size());
+        let budget = self.budget.max(floor(f.byte_size(), self.floor_bytes));
         let before = st.bytes;
         st.bytes += f.byte_size();
         if let Some(old) = st.frames.insert(pts, Arc::new(f)) {
@@ -1442,6 +1457,30 @@ mod tests {
             assert!(matches!(&f.data, filmcraft_frame::PixelData::Rgba8(d) if d.iter().all(|&b| b == i as u8)), "frame {i} has its own pixels");
         }
         assert!(reused() - before >= more as u64 - 2, "{} of {more} planes recycled", reused() - before);
+    }
+
+    #[test]
+    fn the_frame_floor_stops_at_floor_bytes_but_keeps_min_ahead() {
+        let frame = BIG.0 as usize * BIG.1 as usize * 4;
+        // large frames: the floor stops at floor_bytes
+        assert_eq!(floor(frame, 30 * frame), 30 * frame);
+        // never fewer than MIN_AHEAD frames
+        assert_eq!(floor(frame, 0), MIN_AHEAD * frame);
+        // small frames: MIN_FRAMES of them, as before
+        assert_eq!(floor(frame, usize::MAX), MIN_FRAMES * frame);
+        // hostile sizes saturate rather than overflow
+        assert_eq!(floor(usize::MAX, FLOOR_BYTES), usize::MAX);
+
+        // 1×1 RGBA pictures (4 bytes), so no other test's planes are reused or recycled
+        let s = samples(100, 100, 0, false);
+        let mut c = GopCache::new(None);
+        c.budget = 0;
+        c.floor_bytes = 30 * 4;
+        for i in 0..MIN_FRAMES {
+            assert_eq!(index_of(&c.frame(&s, i as i64 * 1000).expect("frame")), i);
+        }
+        let held = c.shared.state.lock().unwrap_or_else(PoisonError::into_inner).frames.len();
+        assert_eq!(held, 30, "the cache holds floor_bytes of frames, not MIN_FRAMES");
     }
 
     /// An open-GOP stream like iPhone HEVC: 8 pictures a GOP; after the first, each GOP stores
