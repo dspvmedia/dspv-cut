@@ -504,10 +504,8 @@ pub fn invoke_command(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut
             app.ui.mode = Mode::Export;
             return Ok(Value::Null);
         }
-        "app.checkForUpdates" => {
-            let _ = crate::updates_ui::check(app);
-            return Ok(serde_json::Value::Null);
-        }
+        // DSPV patch: updates come from DSPV Hub (the command answers with where updates come from, see updates_ui::check)
+        "app.checkForUpdates" => return crate::updates_ui::check(app),
         "app.about" => {
             app.dialog = Some(crate::Dialog::About);
             return Ok(Value::Null);

@@ -47,21 +47,19 @@ impl FilmcraftApp {
     }
 }
 
+/// What Help ▸ Check for Updates… answers in DSPV Cut.
+pub(crate) const FROM_DSPV_HUB: &str = "Updates for DSPV Cut come from DSPV Hub (Apps).";
+
+/// Help ▸ Check for Updates… (`app.checkForUpdates`, also from the native menu, the control server and MCP).
+///
+/// DSPV patch: updates come from DSPV Hub. Upstream starts the updater here, which asks GitHub for FilmCraft's releases and
+/// offers to download one over this build (same bundle id). Our builds are signed and shipped only through the DSPV Hub's
+/// Apps panel, so the command starts no check and opens no window: it says where updates come from, on the status line and
+/// in its result.
 pub(crate) fn check(app: &mut FilmcraftApp) -> Result<Value, String> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        app.updates_rt.check_requested = true;
-        app.updates_rt.manual_window_open = true;
-        if let Some(ctx) = &app.updates_rt.repaint {
-            ctx.request_repaint();
-        }
-        Ok(Value::Null)
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        app.updates_rt.manual_window_open = true;
-        Ok(Value::Null)
-    }
+    let message = crate::i18n::t(FROM_DSPV_HUB).to_string();
+    app.ui.status = message.clone();
+    Ok(serde_json::json!({ "message": message }))
 }
 
 pub(crate) fn tick(app: &mut FilmcraftApp, ctx: &egui::Context) {
@@ -146,6 +144,39 @@ mod tests {
             assert!(!rt.updater.prompt_open());
             assert_eq!(rt.updater.status(), &Status::Idle);
         }
+    }
+
+    /// DSPV patch: updates come from DSPV Hub. The command (menu, native menu, control server, MCP all run it through
+    /// `menus::invoke`) answers with the message and starts no check: the updater stays idle and no window opens.
+    #[test]
+    fn check_for_updates_says_dspv_hub_and_starts_no_check() {
+        let mut app = FilmcraftApp::new(filmcraft_engine::Session::default());
+        let ctx = egui::Context::default();
+        let r = crate::menus::invoke(&mut app, &ctx, "app.checkForUpdates", serde_json::json!({})).expect("the command answers");
+        assert_eq!(r["message"], FROM_DSPV_HUB);
+        assert_eq!(app.ui.status, FROM_DSPV_HUB);
+        assert!(!app.updates_rt.manual_window_open);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            assert!(!app.updates_rt.check_requested);
+            tick(&mut app, &ctx);
+            assert_eq!(app.updates_rt.updater.status(), &Status::Idle, "no check started");
+        }
+    }
+
+    /// DSPV patch: updates come from DSPV Hub. A new app never checks at start, and the desktop app leaves it off.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn the_startup_check_stays_off() {
+        let mut app = FilmcraftApp::new(filmcraft_engine::Session::default());
+        assert!(!app.updates_rt.startup_check);
+        app.set_startup_update_check(false);
+        let ctx = egui::Context::default();
+        for _ in 0..3 {
+            tick(&mut app, &ctx);
+        }
+        assert_eq!(app.updates_rt.updater.status(), &Status::Idle);
+        assert!(!app.updates_rt.updater.prompt_open());
     }
 
     #[test]

@@ -41,7 +41,8 @@ pub fn menu_hint(command: &str) -> Option<String> {
             "help.revealLogFiles" => tl!("Saves this session's log and shows it in your file manager."),
             "help.systemCompatibilityReport" => tl!("Shows a report on this computer."),
             "app.about" => tl!("Shows the version, community links and credits in a FilmCraft window."),
-            "app.checkForUpdates" => tl!("Looks for a newer FilmCraft release and offers to update."),
+            // DSPV patch: updates come from DSPV Hub, so the command no longer looks for upstream's releases
+            "app.checkForUpdates" => tl!("Says where updates come from: DSPV Hub (Apps)."),
             _ => return None,
         }
         .to_string(),

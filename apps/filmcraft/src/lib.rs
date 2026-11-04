@@ -310,7 +310,9 @@ fn app_creator<'a>(
             }
         }
         let mut app = FilmcraftApp::new(session);
-        app.set_startup_update_check(true);
+        // DSPV patch: updates come from DSPV Hub. Upstream turns on a check at start that asks GitHub for FilmCraft's
+        // releases and offers to replace this build; DSPV Cut is updated only from the DSPV Hub's Apps panel.
+        app.set_startup_update_check(false);
         extend(&mut app.hooks);
         #[cfg(target_os = "macos")]
         {
