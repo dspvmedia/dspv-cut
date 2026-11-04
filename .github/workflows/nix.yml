@@ -19,12 +19,14 @@ concurrency:
 
 jobs:
   git-sources:
-    name: Git dependencies come from storytold
+    # DSPV patch: our craft-libs crates come from dspvmedia/dspv-craft-libs, upstream's craft-libs at the
+    # same revisions (Cargo.toml, PR #5). Upstream's guard allows storytold only; we also allow that mirror.
+    name: Git dependencies come from storytold or our craft-libs mirror
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Git dependencies come from storytold
+      - name: Git dependencies come from storytold or our craft-libs mirror
         run: |
           set -euo pipefail
           test -f Cargo.lock || { echo "Cargo.lock is missing"; exit 1; }
@@ -48,11 +50,13 @@ jobs:
           python3 - <<'PY'
           import sys, tomllib
           lock = tomllib.load(open("Cargo.lock", "rb"))
+          allowed = ("git+https://github.com/storytold/",
+                     "git+https://github.com/dspvmedia/dspv-craft-libs?")
           bad = sorted({p["source"] for p in lock.get("package", [])
                         if p.get("source", "").startswith("git+")
-                        and not p["source"].startswith("git+https://github.com/storytold/")})
+                        and not p["source"].startswith(allowed)})
           if bad:
-              print("Git dependencies outside github.com/storytold:", *bad, sep="\n")
+              print("Git dependencies outside github.com/storytold and dspvmedia/dspv-craft-libs:", *bad, sep="\n")
               sys.exit(1)
           PY
 
