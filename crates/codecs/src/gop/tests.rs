@@ -621,8 +621,9 @@ fn large_frames_cannot_enlarge_the_gop_cache_ceiling() {
     assert_eq!(c.cache_budget(FRAME_CACHE_CEILING), FRAME_CACHE_CEILING, "large frames are capped instead of reserving 64 copies");
 }
 
-/// DSPV (dspv-cut #13, absorbed by upstream's #2899 ceiling): 64 frames of 4K 10-bit pictures held about 1.6 GB per
-/// cache whatever its budget, a third of what iPadOS lets an app use. The floor must stay under 768 MB for them.
+/// DSPV (dspv-cut #13, superseded by upstream's #2899 ceiling): 64 frames of 4K 10-bit pictures held about 1.6 GB per
+/// cache whatever its budget, a third of what iPadOS lets an app use. The floor must stay under 768 MB for them. Our patch
+/// also kept at least 24 frames however large; upstream's 384 MB ceiling holds about 15 of these, and that minimum is gone.
 #[test]
 fn the_frame_floor_for_4k_10_bit_pictures_stays_under_768_mb() {
     // 3840×2160 4:2:0 at 16 bits a sample, the decoder's 10-bit output

@@ -1044,3 +1044,23 @@ fn opening_a_clip_in_source_clears_another_panels_maximize() {
     assert_eq!(d.app().ui.keys.maximized, None, "the maximize is cleared so Source is visible");
     assert_eq!(d.app().ui.focused, PanelKind::Source);
 }
+
+/// DSPV (dspv-cut #12): in a window shorter than the File menu (an iPad held sideways) the menu scrolls instead of running off
+/// the window, and its entries still answer a click (File ▸ Close Project closes the demo).
+#[test]
+fn dspv_a_menu_taller_than_the_window_scrolls_and_its_entries_answer() {
+    let mut session = Session::default();
+    session.execute("file.openDemoProject", json!({})).expect("demo project");
+    let mut d = Driver::with_size(session, egui::vec2(1600.0, 300.0));
+    d.click("menu.File");
+    d.frames(4);
+    let room = d.harness.ctx.content_rect().height() - 24.0;
+    let height: Option<f32> = d.harness.ctx.data(|m| m.get_temp(egui::Id::unique(("menu-height", "File"))));
+    assert!(height.is_some_and(|h| h > room), "the File menu ({height:?}) is taller than the room ({room}), so it scrolls");
+    let (_, close) = d.rects("menu.file.closeProject").into_iter().next().expect("Close Project is listed");
+    assert!(close.max.y <= 300.0, "Close Project is inside the window: {close:?}");
+    assert!(!d.harness.state().session.project.items.is_empty(), "the demo is open");
+    d.click("menu.file.closeProject");
+    d.frames(6);
+    assert!(d.harness.state().session.project.items.is_empty(), "File ▸ Close Project answered from the scrolling menu");
+}
