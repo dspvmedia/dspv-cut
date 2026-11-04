@@ -13,7 +13,8 @@ impl FilmcraftApp {
         if self.session.path.is_none() {
             return;
         }
-        let (last_key, focus_key, warned_key) = (egui::Id::unique("diskWatch.last"), egui::Id::unique("diskWatch.focused"), egui::Id::unique("diskWatch.warned"));
+        let (last_key, focus_key, warned_key) =
+            (egui::Id::unique("diskWatch.last"), egui::Id::unique("diskWatch.focused"), egui::Id::unique("diskWatch.warned"));
         let focused = self.native_window_focused.unwrap_or(false);
         let was_focused: bool = ctx.data(|d| d.get_temp(focus_key)).unwrap_or(focused);
         ctx.data_mut(|d| d.insert_temp(focus_key, focused));

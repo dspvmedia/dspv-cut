@@ -273,12 +273,13 @@ impl ColorSpace {
     pub fn gamut(self) -> Gamut {
         match self {
             ColorSpace::Rec709 | ColorSpace::Srgb | ColorSpace::Linear709 => Gamut::Bt709,
-            ColorSpace::Rec2020 | ColorSpace::Rec2100Pq | ColorSpace::Rec2100Hlg | ColorSpace::AppleLog
+            ColorSpace::Rec2020
+            | ColorSpace::Rec2100Pq
+            | ColorSpace::Rec2100Hlg
+            | ColorSpace::AppleLog
             | ColorSpace::NLogBt2020
             | ColorSpace::FLogFGamut
-            | ColorSpace::FLog2FGamut => {
-                Gamut::Bt2020
-            }
+            | ColorSpace::FLog2FGamut => Gamut::Bt2020,
             ColorSpace::P3D65 => Gamut::P3D65,
             ColorSpace::SLog3SGamut3Cine => Gamut::SGamut3Cine,
             ColorSpace::SLog3SGamut3 => Gamut::SGamut3,

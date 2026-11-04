@@ -580,11 +580,13 @@ fn vertex_handles(
         let selected = sel_vs.contains(&i);
         painter.rect_filled(vr, 0.0, if selected { col } else { Color32::WHITE });
         painter.rect_stroke(vr, 0.0, Stroke::new(1.0, col), egui::StrokeKind::Middle);
-        let r = ui.interact(vr.expand(3.0), egui::Id::unique(("mask-vertex", i)), Sense::click_and_drag()).on_hover_text(if cfg!(any(target_os = "macos", target_os = "ios")) {
-            tl!("Drag: move · Alt-click: smooth/corner · Cmd-click: delete")
-        } else {
-            tl!("Drag: move · Alt-click: smooth/corner · Ctrl-click: delete")
-        });
+        let r = ui.interact(vr.expand(3.0), egui::Id::unique(("mask-vertex", i)), Sense::click_and_drag()).on_hover_text(
+            if cfg!(any(target_os = "macos", target_os = "ios")) {
+                tl!("Drag: move · Alt-click: smooth/corner · Cmd-click: delete")
+            } else {
+                tl!("Drag: move · Alt-click: smooth/corner · Ctrl-click: delete")
+            },
+        );
         app.auto.add(&format!("program.mask.vertex.{i}"), vr, "Mask vertex");
         // dragging a selected vertex moves the whole selection; another one is selected first
         // (added to it with Shift)
