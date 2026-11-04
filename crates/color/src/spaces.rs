@@ -36,6 +36,8 @@ pub enum Gamut {
     DGamut,
     /// RED REDWideGamutRGB.
     RedWideGamut,
+    /// Fujifilm F-Gamut C (F-Log2 C). F-Gamut itself has the BT.2020 primaries.
+    FGamutC,
 }
 
 impl Gamut {
@@ -54,6 +56,7 @@ impl Gamut {
             Gamut::Awg4 => [[0.7347, 0.2653], [0.1424, 0.8576], [0.0991, -0.0308]],
             Gamut::DGamut => [[0.71, 0.31], [0.21, 0.88], [0.09, -0.08]],
             Gamut::RedWideGamut => [[0.780_308, 0.304_253], [0.121_595, 1.493_994], [0.095_612, -0.084_589]],
+            Gamut::FGamutC => [[0.7347, 0.2653], [0.0263, 0.9737], [0.1173, -0.0224]],
         }
     }
 
@@ -172,12 +175,18 @@ pub enum ColorSpace {
     NLogBt2020,
     /// RED Log3G10 / REDWideGamutRGB (R3D, and Nikon N-RAW decoded through the RED SDK).
     Log3G10RedWideGamut,
+    /// Fujifilm F-Log / F-Gamut (BT.2020 primaries).
+    FLogFGamut,
+    /// Fujifilm F-Log2 / F-Gamut (BT.2020 primaries).
+    FLog2FGamut,
+    /// Fujifilm F-Log2 C / F-Gamut C.
+    FLog2CFGamutC,
     /// Linear light with BT.709 primaries (EXR-style float sources).
     Linear709,
 }
 
 impl ColorSpace {
-    pub const ALL: [ColorSpace; 18] = [
+    pub const ALL: [ColorSpace; 21] = [
         ColorSpace::Rec709,
         ColorSpace::Srgb,
         ColorSpace::Rec2020,
@@ -195,6 +204,9 @@ impl ColorSpace {
         ColorSpace::DLogDGamut,
         ColorSpace::NLogBt2020,
         ColorSpace::Log3G10RedWideGamut,
+        ColorSpace::FLogFGamut,
+        ColorSpace::FLog2FGamut,
+        ColorSpace::FLog2CFGamutC,
         ColorSpace::Linear709,
     ];
 
@@ -218,6 +230,9 @@ impl ColorSpace {
             ColorSpace::DLogDGamut => "dlog-dgamut",
             ColorSpace::NLogBt2020 => "nlog-bt2020",
             ColorSpace::Log3G10RedWideGamut => "log3g10-rwg",
+            ColorSpace::FLogFGamut => "flog-fgamut",
+            ColorSpace::FLog2FGamut => "flog2-fgamut",
+            ColorSpace::FLog2CFGamutC => "flog2c-fgamutc",
             ColorSpace::Linear709 => "linear709",
         }
     }
@@ -241,6 +256,9 @@ impl ColorSpace {
             ColorSpace::DLogDGamut => "DJI D-Log / D-Gamut",
             ColorSpace::NLogBt2020 => "Nikon N-Log / Rec. 2020",
             ColorSpace::Log3G10RedWideGamut => "RED Log3G10 / REDWideGamutRGB",
+            ColorSpace::FLogFGamut => "Fujifilm F-Log / F-Gamut",
+            ColorSpace::FLog2FGamut => "Fujifilm F-Log2 / F-Gamut",
+            ColorSpace::FLog2CFGamutC => "Fujifilm F-Log2 C / F-Gamut C",
             ColorSpace::Linear709 => "Linear (Rec. 709 primaries)",
         }
     }
@@ -255,7 +273,13 @@ impl ColorSpace {
     pub fn gamut(self) -> Gamut {
         match self {
             ColorSpace::Rec709 | ColorSpace::Srgb | ColorSpace::Linear709 => Gamut::Bt709,
-            ColorSpace::Rec2020 | ColorSpace::Rec2100Pq | ColorSpace::Rec2100Hlg | ColorSpace::AppleLog | ColorSpace::NLogBt2020 => Gamut::Bt2020,
+            ColorSpace::Rec2020
+            | ColorSpace::Rec2100Pq
+            | ColorSpace::Rec2100Hlg
+            | ColorSpace::AppleLog
+            | ColorSpace::NLogBt2020
+            | ColorSpace::FLogFGamut
+            | ColorSpace::FLog2FGamut => Gamut::Bt2020,
             ColorSpace::P3D65 => Gamut::P3D65,
             ColorSpace::SLog3SGamut3Cine => Gamut::SGamut3Cine,
             ColorSpace::SLog3SGamut3 => Gamut::SGamut3,
@@ -265,6 +289,7 @@ impl ColorSpace {
             ColorSpace::LogC4Awg4 => Gamut::Awg4,
             ColorSpace::DLogDGamut => Gamut::DGamut,
             ColorSpace::Log3G10RedWideGamut => Gamut::RedWideGamut,
+            ColorSpace::FLog2CFGamutC => Gamut::FGamutC,
         }
     }
 
@@ -285,6 +310,8 @@ impl ColorSpace {
             ColorSpace::DLogDGamut => Curve::Log(LogCurve::DLog),
             ColorSpace::NLogBt2020 => Curve::Log(LogCurve::NLog),
             ColorSpace::Log3G10RedWideGamut => Curve::Log(LogCurve::Log3G10),
+            ColorSpace::FLogFGamut => Curve::Log(LogCurve::FLog),
+            ColorSpace::FLog2FGamut | ColorSpace::FLog2CFGamutC => Curve::Log(LogCurve::FLog2),
         }
     }
 

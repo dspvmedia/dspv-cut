@@ -40,6 +40,8 @@ for limited- and full-range files.
 | DJI D-Log | D-Gamut | DJI, *White Paper on D-Log and D-Gamut of DJI Cinema Color System* (2017) | CV | y ≤ 0.14: x = (y − 0.0929)/6.025; else x = (10^(3.89616y − 2.27752) − 0.0108)/0.9892 |
 | Nikon N-Log | BT.2020 | Nikon, *N-Log Specification Document* version 1.0.0 (2018-09-01) | CV | code x = 1023y; x < 452: reflectance = (x/650)³ − 0.0075; else reflectance = exp((x − 619)/150) |
 | RED Log3G10 | REDWideGamutRGB | RED Digital Cinema, *White Paper on REDWideGamutRGB and Log3G10* (2017) | CV | y < 0: x = y/15.1927 − 0.01; else x = (10^(y/0.224282) − 1)/155.975327 − 0.01 |
+| Fujifilm F-Log | F-Gamut (= BT.2020 primaries) | Fujifilm, *GFX ETERNA Technical Guide – White Paper* v1.01 (2026), F-Log conversion formula (same as the F-Log data sheet) | CV | y ≥ cut2: x = 10^((y − d)/c)/a − b/a; else x = (y − f)/e; a 0.555556, b 0.009468, c 0.344676, d 0.790453, e 8.735631, f 0.092864, cut1 0.00089, cut2 0.100537775223865 |
+| Fujifilm F-Log2 / F-Log2 C | F-Gamut / F-Gamut C (R 0.7347, 0.2653; G 0.0263, 0.9737; B 0.1173, −0.0224) | same document, F-Log2 C / F-Log2 conversion formula | CV | same form; a 5.555556, b 0.064829, c 0.245281, d 0.384316, e 8.799461, f 0.092864, cut1 0.000889, cut2 0.100686685370811 |
 
 The encoders are the exact inverses given in the same documents. The one exception is Nikon N-Log: its
 document gives the encoder's branch point as reflectance 0.328 and the decoder's as code 452, which are
