@@ -24,10 +24,14 @@ struct Driver {
 
 impl Driver {
     fn with(session: Session) -> Self {
+        Self::with_size(session, egui::vec2(1600.0, 980.0))
+    }
+
+    fn with_size(session: Session, size: egui::Vec2) -> Self {
         let (tx, rx) = channel();
         let app = FilmcraftApp::new(session).with_control(rx);
         let snapshots = std::env::var_os("FILMCRAFT_UI_SNAPSHOT_DIR").map(std::path::PathBuf::from);
-        let mut b = Harness::builder().with_size(egui::vec2(1600.0, 980.0)).with_max_steps(10_000);
+        let mut b = Harness::builder().with_size(size).with_max_steps(10_000);
         if snapshots.is_some() {
             b = b.wgpu();
         }
@@ -981,6 +985,22 @@ fn menu_bar_menus_use_the_13pt_menu_text() {
             .unwrap_or_else(|| panic!("`{label}` is not drawn in {rect:?}"));
         assert_eq!(font.size, 13.0, "`{label}` in the File menu");
     }
+}
+
+/// DSPV (dspv-cut #10): the in-window menu bar shows its titles side by side while they fit before the right-hand buttons, and
+/// folds into one Menu button only in a window too narrow for them (an iPad held upright). Upstream's 13 pt menu text runs past
+/// the bar's 520 pt hint on a desktop window, which must not fold it.
+#[test]
+fn dspv_menu_bar_folds_into_one_menu_button_only_when_narrow() {
+    let mut wide = Driver::demo();
+    assert!(wide.has("menu.File") && !wide.has("menu.compact"), "a 1600 pt window shows the titles");
+    let mut session = Session::default();
+    session.execute("file.openDemoProject", json!({})).expect("demo project");
+    let mut narrow = Driver::with_size(session, egui::vec2(760.0, 980.0));
+    assert!(narrow.has("menu.compact") && !narrow.has("menu.File"), "a 760 pt window folds them");
+    narrow.click("menu.compact");
+    narrow.frames(3);
+    assert!(narrow.has("menu.File"), "the Menu button lists the menus");
 }
 
 /// #3669: opening a clip in the Source monitor must also focus it, so Space plays that clip.

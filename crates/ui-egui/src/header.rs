@@ -65,14 +65,16 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
     if app.ui.show_menu_bar {
         // The menus end before the right cluster (six buttons at 38 pt, the workspace name); a window too
         // narrow for the titles side by side (an iPad held upright) gets them folded into one Menu button.
-        let ws_width = p.layout_no_wrap(crate::i18n::t(&app.ui.workspace).to_uppercase(), Tokens::ui(11.0), t.text_dim).size().x;
+        let ws_width = p.layout_no_wrap(crate::i18n::to_uppercase(crate::i18n::t(&app.ui.workspace)), Tokens::ui(11.0), t.text_dim).size().x;
         let limit = rect.max.x - 14.0 - 6.0 * 38.0 - ws_width - 24.0;
         let menu_rect = Rect::from_min_max(pos2(x + 6.0, rect.min.y + 7.0), pos2((x + 520.0).min(limit).max(x + 6.0), rect.max.y - 7.0));
         let mut mu = ui.new_child(egui::UiBuilder::new().max_rect(menu_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
         mu.style_mut().visuals.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
         mu.style_mut().visuals.widgets.inactive.bg_stroke = Stroke::NONE;
         mu.style_mut().visuals.override_text_color = Some(t.text_dim);
-        if crate::menus::menu_bar_width(app, &mu) <= menu_rect.width() {
+        // the titles may run past the 520 pt hint (upstream's 13 pt menu text does on a desktop window): fold them only when
+        // they would reach the right cluster
+        if crate::menus::menu_bar_width(app, &mu) <= (limit - menu_rect.min.x).max(0.0) {
             crate::menus::menu_bar(app, &mut mu);
         } else {
             crate::menus::menu_bar_compact(app, &mut mu);

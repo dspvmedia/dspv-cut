@@ -1241,9 +1241,11 @@ pub fn menu_bar_compact(app: &mut FilmcraftApp, ui: &mut egui::Ui) {
 
 /// How wide the menu bar's titles are side by side, in points.
 pub fn menu_bar_width(app: &FilmcraftApp, ui: &egui::Ui) -> f32 {
-    let style = ui.style();
+    // measured in the bar's own style (menu text size), as `draw_menu_bar` draws it
+    let mut style = (**ui.style()).clone();
+    crate::theme::menu_style(&mut style);
     let pad = 2.0 * style.spacing.button_padding.x + style.spacing.item_spacing.x;
-    let font = egui::TextStyle::Button.resolve(style);
+    let font = egui::TextStyle::Button.resolve(&style);
     MENUS.iter().map(|top| ui.painter().layout_no_wrap(app.ui.language.tr(top).to_string(), font.clone(), egui::Color32::WHITE).size().x + pad).sum()
 }
 
@@ -1315,9 +1317,22 @@ fn switch_on_hover(ctx: &egui::Context, titles: &[egui::Response]) {
 
 /// A menu taller than the window scrolls instead of running off it: File has more items than a
 /// short window (an iPad held sideways) has room for, and the last ones could not be reached.
+///
+/// Only a menu that was taller than the room the last time it was drawn gets the scroll area: with egui 0.37 a menu entry
+/// inside a scroll area no longer answers a click when everything fits (the 2026-11-03 sync), so a menu that fits is drawn
+/// as upstream draws it.
 fn scroll_if_tall(ui: &mut egui::Ui, id: &str, add: impl FnOnce(&mut egui::Ui)) {
     let room = (ui.ctx().content_rect().height() - 24.0).max(120.0);
-    egui::ScrollArea::vertical().id_salt(("menu-scroll", id)).max_height(room).auto_shrink([true, true]).show(ui, add);
+    let key = egui::Id::unique(("menu-height", id));
+    let tall = ui.ctx().data(|d| d.get_temp::<f32>(key)).is_some_and(|h| h > room);
+    let height = if tall {
+        egui::ScrollArea::vertical().id_salt(("menu-scroll", id)).max_height(room).auto_shrink([true, true]).show(ui, add).content_size.y
+    } else {
+        let top = ui.cursor().min.y;
+        add(ui);
+        ui.min_rect().max.y - top
+    };
+    ui.ctx().data_mut(|d| d.insert_temp(key, height));
 }
 
 /// One menu level: items whose path ends here, and a submenu (at its first item's position) for
