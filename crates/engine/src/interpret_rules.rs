@@ -8,7 +8,10 @@
 //! A rule matches a file when its extension is listed (`extensions`), or when a *companion* file
 //! with the same name and the companion extension exists in the same folder or in one of the
 //! companion's `dirs` (the proxy of a raw clip is found by the raw clip next to it, or in a
-//! sibling folder). The first matching rule wins and sets the clip's colour space exactly as
+//! sibling folder), or when the file itself carries a *tag*: a piece of text inside one box of an
+//! MP4 / QuickTime file (`moov/udta/<maker box>`), where cameras write what they were set to (a
+//! log recording that is not written as raw has no companion, but its camera says so in the file).
+//! The first matching rule wins and sets the clip's colour space exactly as
 //! `clip.interpretFootage` would, in the same undo step as the import. A clip the user already
 //! interpreted is never overwritten by `project.applyInterpretRules` unless asked.
 //!
@@ -36,6 +39,14 @@ const MAX_COMPANION_DIRS: usize = 16;
 const MAX_LISTED: usize = 200_000;
 /// Longest accepted rule file.
 const MAX_RULE_FILE: usize = 1 << 20;
+/// Deepest box path a tag may name.
+const MAX_TAG_DEPTH: usize = 8;
+/// Longest text a tag may look for.
+const MAX_TAG_TEXT: usize = 256;
+/// Most boxes looked at on one level (a file of a million tiny boxes must not stall an import).
+const MAX_TAG_BOXES: usize = 4096;
+/// Most bytes of the named box that are searched.
+const MAX_TAG_BYTES: u64 = 4 << 20;
 
 /// A file that has the same name as the clip, with this extension, in the clip's folder or in
 /// one of `dirs` (relative to the clip's folder, or absolute; empty string = the clip's folder).
@@ -56,6 +67,17 @@ pub struct ProxyLink {
     pub dirs: Vec<String>,
 }
 
+/// Text the file carries in one box of an ISO base media / QuickTime file (MP4, MOV): `path` names the box by its four-character
+/// types from the top level, separated by `/` (e.g. `moov/udta/NCDT`, where a camera keeps its maker notes), and `contains` is text
+/// that must occur somewhere in that box (exact bytes, case-sensitive; only the first 4 MB of the box are searched). Boxes on the
+/// way are read as plain containers. A file that is not such a file, or has no such box, does not match.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct FileTag {
+    pub path: String,
+    pub contains: String,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct InterpretRule {
@@ -64,6 +86,8 @@ pub struct InterpretRule {
     pub extensions: Vec<String>,
     /// Match by a companion file.
     pub companion: Option<Companion>,
+    /// Match by text inside the file's own metadata.
+    pub tag: Option<FileTag>,
     /// Attach the proxy found here to a clip this rule matches.
     pub proxy: Option<ProxyLink>,
     /// A colour space id (`color.spaces`), e.g. `nlog-bt2020`.
@@ -119,9 +143,67 @@ fn find_named<'a>(names: &'a [String], stem: &str, ext: &str) -> Option<&'a Stri
     })
 }
 
-/// Whether `rule` matches a clip called `<stem>.<ext>` in `media_dir`: by its own extension, or by a companion file.
-fn rule_matches(rule: &InterpretRule, ext: &str, stem: &str, media_dir: &str, list: &dyn Fn(&str) -> Option<Vec<String>>) -> bool {
+/// Reads up to `len` bytes of the clip's file from `offset` (`None`: cannot be read).
+type ReadAt<'a> = &'a dyn Fn(u64, usize) -> Option<Vec<u8>>;
+
+/// The four-character box types of a tag path (`None`: not a valid path).
+fn tag_path(path: &str) -> Option<Vec<[u8; 4]>> {
+    let parts: Vec<[u8; 4]> = path.split('/').map(|p| p.as_bytes().try_into().ok()).collect::<Option<_>>()?;
+    (!parts.is_empty() && parts.len() <= MAX_TAG_DEPTH).then_some(parts)
+}
+
+/// The bytes of the box at `path` (at most [`MAX_TAG_BYTES`] of them), walking box headers with `read`.
+fn box_bytes(read: ReadAt<'_>, path: &[[u8; 4]]) -> Option<Vec<u8>> {
+    let (mut start, mut end) = (0u64, u64::MAX);
+    for want in path {
+        let mut off = start;
+        let mut found = None;
+        for _ in 0..MAX_TAG_BOXES {
+            if off.checked_add(8).is_none_or(|h| h > end) {
+                break;
+            }
+            let head = read(off, 16)?;
+            let (Some(size), Some(kind)) = (head.get(0..4), head.get(4..8)) else { break };
+            let (size, header) = match u32::from_be_bytes(size.try_into().ok()?) {
+                // 64-bit size follows the type
+                1 => (u64::from_be_bytes(head.get(8..16)?.try_into().ok()?), 16u64),
+                // the box runs to the end of its parent (or of the file)
+                0 => (end.saturating_sub(off), 8),
+                n => (u64::from(n), 8),
+            };
+            if size < header {
+                break;
+            }
+            let box_end = off.saturating_add(size).min(end);
+            if kind == want {
+                found = Some((off.saturating_add(header), box_end));
+                break;
+            }
+            if box_end <= off {
+                break;
+            }
+            off = box_end;
+        }
+        (start, end) = found?;
+    }
+    let len = end.saturating_sub(start).min(MAX_TAG_BYTES);
+    read(start, usize::try_from(len).ok()?)
+}
+
+/// Whether the file read by `read` carries `tag`.
+fn has_tag(tag: &FileTag, read: ReadAt<'_>) -> bool {
+    let needle = tag.contains.as_bytes();
+    let Some(path) = tag_path(&tag.path) else { return false };
+    !needle.is_empty() && box_bytes(read, &path).is_some_and(|b| b.windows(needle.len()).any(|w| w == needle))
+}
+
+/// Whether `rule` matches a clip called `<stem>.<ext>` in `media_dir`: by its own extension, by a companion file, or by a tag
+/// the file carries (read with `read`).
+fn rule_matches(rule: &InterpretRule, ext: &str, stem: &str, media_dir: &str, list: &dyn Fn(&str) -> Option<Vec<String>>, read: ReadAt<'_>) -> bool {
     if !ext.is_empty() && rule.extensions.iter().any(|e| e.trim_start_matches('.').eq_ignore_ascii_case(ext)) {
+        return true;
+    }
+    if rule.tag.as_ref().is_some_and(|t| has_tag(t, read)) {
         return true;
     }
     let Some(c) = &rule.companion else { return false };
@@ -147,8 +229,14 @@ fn rule_matches(rule: &InterpretRule, ext: &str, stem: &str, media_dir: &str, li
 
 /// The colour space the first matching rule gives the file at `path`. `list` returns the file
 /// names in a folder (`None`: cannot be listed, so no companion is found there). A rule whose
-/// colour space id is unknown is skipped, never an error: rules come from a file.
+/// colour space id is unknown is skipped, never an error: rules come from a file. Tags are not
+/// read here (see [`color_space_for_file`]).
 pub fn color_space_for(rules: &[InterpretRule], path: &str, list: &dyn Fn(&str) -> Option<Vec<String>>) -> Option<ColorSpace> {
+    color_space_for_file(rules, path, list, &|_, _| None)
+}
+
+/// [`color_space_for`], reading the file with `read` (offset, length) for rules that match by a tag.
+pub fn color_space_for_file(rules: &[InterpretRule], path: &str, list: &dyn Fn(&str) -> Option<Vec<String>>, read: ReadAt<'_>) -> Option<ColorSpace> {
     let (media_dir, file) = split_path(path);
     let (stem, ext) = split_name(file);
     if stem.is_empty() {
@@ -156,7 +244,7 @@ pub fn color_space_for(rules: &[InterpretRule], path: &str, list: &dyn Fn(&str) 
     }
     rules.iter().take(MAX_RULES).find_map(|rule| {
         let cs = ColorSpace::parse(&rule.color_space)?;
-        rule_matches(rule, ext, stem, media_dir, list).then_some(cs)
+        rule_matches(rule, ext, stem, media_dir, list, read).then_some(cs)
     })
 }
 
@@ -179,8 +267,13 @@ fn tidy_path(p: &str) -> String {
 }
 
 /// The proxy file of the clip at `path` from the first matching rule that has a [`ProxyLink`] and finds its file. The result is a
-/// path; whether the proxy fits the clip is for the caller to check.
+/// path; whether the proxy fits the clip is for the caller to check. Tags are not read here (see [`proxy_for_file`]).
 pub fn proxy_for(rules: &[InterpretRule], path: &str, list: &dyn Fn(&str) -> Option<Vec<String>>) -> Option<String> {
+    proxy_for_file(rules, path, list, &|_, _| None)
+}
+
+/// [`proxy_for`], reading the file with `read` (offset, length) for rules that match by a tag.
+pub fn proxy_for_file(rules: &[InterpretRule], path: &str, list: &dyn Fn(&str) -> Option<Vec<String>>, read: ReadAt<'_>) -> Option<String> {
     let (media_dir, file) = split_path(path);
     let (stem, ext) = split_name(file);
     if stem.is_empty() {
@@ -189,7 +282,7 @@ pub fn proxy_for(rules: &[InterpretRule], path: &str, list: &dyn Fn(&str) -> Opt
     for rule in rules.iter().take(MAX_RULES) {
         let Some(link) = &rule.proxy else { continue };
         let link_ext = link.extension.trim_start_matches('.');
-        if link_ext.is_empty() || !rule_matches(rule, ext, stem, media_dir, list) {
+        if link_ext.is_empty() || !rule_matches(rule, ext, stem, media_dir, list, read) {
             continue;
         }
         let default_dirs = [String::new()];
@@ -206,20 +299,24 @@ pub fn proxy_for(rules: &[InterpretRule], path: &str, list: &dyn Fn(&str) -> Opt
     None
 }
 
-/// [`color_space_for`] with the host's directory listing.
+/// [`color_space_for_file`] with the host's directory listing and file reads.
 pub fn resolve(rules: &[InterpretRule], path: &str, services: &dyn Services) -> Option<ColorSpace> {
     if rules.is_empty() {
         return None;
     }
-    color_space_for(rules, path, &|dir| services.list_dir(dir.trim_end_matches(['/', '\\'])).and_then(|r| r.ok()))
+    color_space_for_file(rules, path, &|dir| services.list_dir(dir.trim_end_matches(['/', '\\'])).and_then(|r| r.ok()), &|off, len| {
+        services.read_range(path, off, len).ok()
+    })
 }
 
-/// [`proxy_for`] with the host's directory listing.
+/// [`proxy_for_file`] with the host's directory listing and file reads.
 pub fn find_proxy(rules: &[InterpretRule], path: &str, services: &dyn Services) -> Option<String> {
     if rules.is_empty() {
         return None;
     }
-    proxy_for(rules, path, &|dir| services.list_dir(dir.trim_end_matches(['/', '\\'])).and_then(|r| r.ok()))
+    proxy_for_file(rules, path, &|dir| services.list_dir(dir.trim_end_matches(['/', '\\'])).and_then(|r| r.ok()), &|off, len| {
+        services.read_range(path, off, len).ok()
+    })
 }
 
 /// Check rules from a user or a file and put them in canonical form (lower-case extensions
@@ -255,8 +352,17 @@ pub fn validate(mut rules: Vec<InterpretRule>) -> std::result::Result<Vec<Interp
                 return Err(at(&format!("at most {MAX_COMPANION_DIRS} proxy folders")));
             }
         }
-        if r.extensions.is_empty() && r.companion.is_none() {
-            return Err(at("needs `extensions` or a `companion`"));
+        if let Some(t) = r.tag.as_mut() {
+            t.path = t.path.trim().trim_matches('/').to_string();
+            if tag_path(&t.path).is_none() {
+                return Err(at(&format!("a tag path is up to {MAX_TAG_DEPTH} four-character box types separated by `/`, e.g. `moov/udta/NCDT`")));
+            }
+            if t.contains.is_empty() || t.contains.len() > MAX_TAG_TEXT {
+                return Err(at(&format!("a tag needs `contains`: 1 to {MAX_TAG_TEXT} bytes of text")));
+            }
+        }
+        if r.extensions.is_empty() && r.companion.is_none() && r.tag.is_none() {
+            return Err(at("needs `extensions`, a `companion` or a `tag`"));
         }
     }
     Ok(rules)
@@ -574,5 +680,150 @@ mod tests {
             ..Default::default()
         };
         assert!(validate(vec![dirs]).is_err());
+    }
+
+    /// A box: 32-bit size, type, payload.
+    fn bx(kind: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+        let mut b = ((payload.len() + 8) as u32).to_be_bytes().to_vec();
+        b.extend_from_slice(kind);
+        b.extend_from_slice(payload);
+        b
+    }
+
+    /// An MP4 laid out like a Nikon camera file: `ftyp`, then `moov` holding `mvhd`, a `trak` and `udta/NCDT` (the maker notes,
+    /// where the camera writes its Picture Control name), then `mdat`.
+    fn camera_file(picture_control: &str) -> Vec<u8> {
+        let mut notes = b"\x00\x23\x00\x07\x00\x00\x00\x6c0310".to_vec();
+        notes.extend_from_slice(picture_control.as_bytes());
+        notes.extend_from_slice(&[0; 20]);
+        let udta = bx(b"udta", &[bx(b"NCTG", b"NIKON Z 9"), bx(b"NCDT", &notes)].concat());
+        let moov = bx(b"moov", &[bx(b"mvhd", &[0; 100]), bx(b"trak", &bx(b"tkhd", &[0; 84])), udta].concat());
+        [bx(b"ftyp", b"mp42\x00\x00\x00\x01mp42avc1niko"), moov, bx(b"mdat", &[0xAB; 3000])].concat()
+    }
+
+    fn reader(bytes: &[u8]) -> impl Fn(u64, usize) -> Option<Vec<u8>> + '_ {
+        move |off, len| {
+            let a = usize::try_from(off).ok()?.min(bytes.len());
+            Some(bytes[a..a.saturating_add(len).min(bytes.len())].to_vec())
+        }
+    }
+
+    fn tag_rules() -> Vec<InterpretRule> {
+        validate(vec![InterpretRule {
+            name: "camera log".into(),
+            tag: Some(FileTag { path: "/moov/udta/NCDT/".into(), contains: "N-LOG".into() }),
+            color_space: "nlog-bt2020".into(),
+            ..Default::default()
+        }])
+        .unwrap()
+    }
+
+    #[test]
+    fn a_file_whose_camera_says_log_matches_and_one_that_says_otherwise_does_not() {
+        let none = |_: &str| None;
+        let log = camera_file("N-LOG");
+        let neutral = camera_file("NEUTRAL");
+        let rules = tag_rules();
+        assert_eq!(rules[0].tag.as_ref().unwrap().path, "moov/udta/NCDT", "slashes at the ends are trimmed");
+        assert_eq!(color_space_for_file(&rules, "/clips/DSC_0303.MP4", &none, &reader(&log)), Some(ColorSpace::NLogBt2020));
+        assert_eq!(color_space_for_file(&rules, "/clips/DSC_0092.MP4", &none, &reader(&neutral)), None);
+        // without file reads (the old entry point) a tag never matches
+        assert_eq!(color_space_for(&rules, "/clips/DSC_0303.MP4", &none), None);
+    }
+
+    #[test]
+    fn the_text_must_be_in_the_named_box_not_elsewhere_in_the_file() {
+        let none = |_: &str| None;
+        // "N-LOG" in mdat (picture data) and in another udta box, but the maker notes say NEUTRAL
+        let mut f = camera_file("NEUTRAL");
+        f.extend_from_slice(&bx(b"free", b"N-LOG"));
+        let udta = bx(b"udta", &bx(b"XTRA", b"N-LOG"));
+        let moov = bx(b"moov", &udta);
+        f.extend_from_slice(&moov);
+        assert_eq!(color_space_for_file(&tag_rules(), "a.mp4", &none, &reader(&f)), None);
+        // a path to a box that is not there
+        let other = validate(vec![InterpretRule {
+            tag: Some(FileTag { path: "moov/meta/NCDT".into(), contains: "N-LOG".into() }),
+            color_space: "nlog-bt2020".into(),
+            ..Default::default()
+        }])
+        .unwrap();
+        assert_eq!(color_space_for_file(&other, "a.mp4", &none, &reader(&camera_file("N-LOG"))), None);
+    }
+
+    #[test]
+    fn large_sizes_and_boxes_that_run_to_the_end_are_followed() {
+        let none = |_: &str| None;
+        // moov written with a 64-bit size, and maker notes in a size-0 box (runs to the end of its parent)
+        let notes = b"....N-LOG....".to_vec();
+        let mut ncdt = 0u32.to_be_bytes().to_vec();
+        ncdt.extend_from_slice(b"NCDT");
+        ncdt.extend_from_slice(&notes);
+        let udta = bx(b"udta", &ncdt);
+        let mut moov = 1u32.to_be_bytes().to_vec();
+        moov.extend_from_slice(b"moov");
+        moov.extend_from_slice(&((udta.len() + 16) as u64).to_be_bytes());
+        moov.extend_from_slice(&udta);
+        let f = [bx(b"ftyp", b"isom"), moov].concat();
+        assert_eq!(color_space_for_file(&tag_rules(), "a.mov", &none, &reader(&f)), Some(ColorSpace::NLogBt2020));
+    }
+
+    #[test]
+    fn files_that_are_not_boxes_or_are_broken_never_panic_and_never_match() {
+        let none = |_: &str| None;
+        let rules = tag_rules();
+        let wav = b"RIFF\x24\x00\x00\x00WAVEfmt ".to_vec();
+        let mut cut = camera_file("N-LOG");
+        cut.truncate(60);
+        let tiny = bx(b"moov", &[1, 2, 3]);
+        let mut zero_size_loop = 8u32.to_be_bytes().to_vec();
+        zero_size_loop.extend_from_slice(b"free");
+        zero_size_loop = zero_size_loop.repeat(MAX_TAG_BOXES + 10);
+        let mut lies = u32::MAX.to_be_bytes().to_vec();
+        lies.extend_from_slice(b"moov");
+        let mut short = 3u32.to_be_bytes().to_vec();
+        short.extend_from_slice(b"moov");
+        let mut huge64 = 1u32.to_be_bytes().to_vec();
+        huge64.extend_from_slice(b"moov");
+        huge64.extend_from_slice(&u64::MAX.to_be_bytes());
+        for f in [vec![], vec![0; 3], wav, cut, tiny, zero_size_loop, lies, short, huge64] {
+            assert_eq!(color_space_for_file(&rules, "a.mp4", &none, &reader(&f)), None);
+        }
+        // an unreadable file
+        assert_eq!(color_space_for_file(&rules, "a.mp4", &none, &|_, _| None), None);
+    }
+
+    #[test]
+    fn a_tag_rule_can_name_a_proxy_too() {
+        let log = camera_file("N-LOG");
+        let rules = validate(vec![InterpretRule {
+            tag: Some(FileTag { path: "moov/udta/NCDT".into(), contains: "N-LOG".into() }),
+            proxy: Some(ProxyLink { extension: "mp4".into(), dirs: vec!["Proxy".into()] }),
+            color_space: "nlog-bt2020".into(),
+            ..Default::default()
+        }])
+        .unwrap();
+        let list = disk(&[("/job/Proxy", &["DSC_1.MP4"])]);
+        assert_eq!(proxy_for_file(&rules, "/job/DSC_1.MOV", &list, &reader(&log)).as_deref(), Some("/job/Proxy/DSC_1.MP4"));
+        assert_eq!(proxy_for_file(&rules, "/job/DSC_1.MOV", &list, &reader(&camera_file("STANDARD"))), None);
+    }
+
+    #[test]
+    fn validation_checks_tags() {
+        let with = |path: &str, contains: &str| {
+            validate(vec![InterpretRule {
+                tag: Some(FileTag { path: path.into(), contains: contains.into() }),
+                color_space: "nlog-bt2020".into(),
+                ..Default::default()
+            }])
+        };
+        assert!(with("moov/udta/NCDT", "N-LOG").is_ok());
+        for bad in ["", "moov//NCDT", "moov/udta/NCD", "moov/udta/NCDTX", &"moov/".repeat(MAX_TAG_DEPTH + 1)] {
+            assert!(with(bad, "N-LOG").unwrap_err().contains("tag path"), "{bad:?}");
+        }
+        assert!(with("moov", "").unwrap_err().contains("contains"));
+        assert!(with("moov", &"x".repeat(MAX_TAG_TEXT + 1)).unwrap_err().contains("contains"));
+        let empty = InterpretRule { color_space: "rec709".into(), ..Default::default() };
+        assert!(validate(vec![empty]).unwrap_err().contains("tag"));
     }
 }

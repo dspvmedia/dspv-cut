@@ -276,3 +276,28 @@ fn the_pool_plays_the_proxy_when_proxies_are_on_and_the_clip_for_export() {
     let exporting = s.media.full_res_source(&s.project, id, &*s.services).unwrap();
     assert_ne!(Arc::as_ptr(&playing) as *const u8, Arc::as_ptr(&exporting) as *const u8, "playback and export read different sources");
 }
+
+#[test]
+fn a_tag_is_read_from_the_file_on_disk_through_the_host() {
+    fn bx(kind: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+        let mut b = ((payload.len() + 8) as u32).to_be_bytes().to_vec();
+        b.extend_from_slice(kind);
+        b.extend_from_slice(payload);
+        b
+    }
+    let file = |control: &[u8]| [bx(b"ftyp", b"mp42"), bx(b"moov", &bx(b"udta", &bx(b"NCDT", &[b"0310", control].concat()))), bx(b"mdat", &[0; 64])].concat();
+    let d = tmp_dir("tag");
+    std::fs::write(d.join("DSC_1.MP4"), file(b"N-LOG")).unwrap();
+    std::fs::write(d.join("DSC_2.MP4"), file(b"STANDARD")).unwrap();
+    let rules: Vec<crate::interpret_rules::InterpretRule> =
+        serde_json::from_value(json!([{"tag": {"path": "moov/udta/NCDT", "contains": "N-LOG"}, "colorSpace": "nlog-bt2020"}])).unwrap();
+    let rules = crate::interpret_rules::validate(rules).unwrap();
+    let at = |n: &str| crate::interpret_rules::resolve(&rules, &d.join(n).to_string_lossy(), &crate::FsServices);
+    assert_eq!(at("DSC_1.MP4"), Some(ColorSpace::NLogBt2020));
+    assert_eq!(at("DSC_2.MP4"), None);
+    assert_eq!(at("missing.MP4"), None);
+    // the rule round-trips through import.setRules
+    let mut s = Session::default();
+    s.execute("import.setRules", json!({"rules": [{"tag": {"path": "moov/udta/NCDT", "contains": "N-LOG"}, "colorSpace": "nlog-bt2020"}]})).unwrap();
+    assert_eq!(s.execute("import.rules", json!({})).unwrap()["rules"][0]["tag"]["contains"], "N-LOG");
+}
