@@ -59,7 +59,7 @@ pub fn install(app: &FilmcraftApp, ctx: egui::Context) -> (Receiver<String>, Men
     // About repeats the Help menu command: same translated label, updated with it. (DSPV fork: upstream
     // also puts "Join the ArtCraft Discord" here; a modified version may not link the ArtCraft community.)
     let label = |id: &str, english: &str| items.iter().find(|i| i.id == id).map_or_else(|| english.to_string(), |i| i.label.clone());
-    let about = MenuItem::with_id("app.about", label("app.about", "About FilmCraft"), true, None);
+    let about = MenuItem::with_id("app.about", label("app.about", "About DSPV Cut"), true, None);
     if let Some(it) = items.iter().find(|i| i.id == "app.about") {
         // recorded as built (enabled, no shortcut), so the first update applies the real state
         native.push((Item { enabled: true, shortcut: None, ..it.clone() }, about.clone()));

@@ -20,7 +20,7 @@
 # Option = Wahl, Ctrl = Strg.
 
 	AAF…	AAF…
-	About FilmCraft	Über FilmCraft
+	About DSPV Cut	Über DSPV Cut
 	Add Audio Submix Track	Audio-Submix-Spur hinzufügen
 	Add Caption at Playhead	Untertitel an Abspielposition hinzufügen
 	Add Chapter Marker…	Kapitelmarker hinzufügen…
@@ -149,8 +149,8 @@
 	File	Datei
 	File…	Datei…
 	Fill frame	Bild füllen
-	FilmCraft Help…	FilmCraft-Hilfe…
-	FilmCraft on GitHub	FilmCraft auf GitHub
+	DSPV Cut Help…	DSPV-Cut-Hilfe…
+	DSPV Cut on GitHub	DSPV Cut auf GitHub
 	Final Cut Pro XML…	Final Cut Pro XML…
 	Find Next	Weitersuchen
 	Find…	Suchen…
@@ -185,7 +185,7 @@
 	Help	Hilfe
 	☰ Menu	☰ Menü
 	Hide All Caption Tracks	Alle Untertitelspuren ausblenden
-	Hide FilmCraft	FilmCraft ausblenden
+	Hide DSPV Cut	DSPV Cut ausblenden
 	Hide Others	Andere ausblenden
 	High Quality Playback	Wiedergabe in hoher Qualität
 	History	Verlauf
@@ -277,7 +277,7 @@
 	Properties	Eigenschaften
 	Proxy	Proxy
 	Purple	Lila
-	Quit FilmCraft	FilmCraft beenden
+	Quit DSPV Cut	DSPV Cut beenden
 	Reconnect Full Resolution Media…	Medien in voller Auflösung neu verknüpfen…
 	Recover Unsaved Changes…	Nicht gespeicherte Änderungen wiederherstellen…
 	Rectangle	Rechteck
@@ -297,7 +297,6 @@
 	Render Selection	Auswahl rendern
 	Replace Fonts in Projects…	Schriften in Projekten ersetzen…
 	Replace With Clip	Durch Clip ersetzen
-	Report an Issue…	Problem melden…
 	Reset All Parameters	Alle Parameter zurücksetzen
 	Reset Duration	Dauer zurücksetzen
 	Reset to Saved Layout	Auf gespeichertes Layout zurücksetzen
@@ -453,7 +452,6 @@
 	Delete Empty Caption Tracks	Leere Untertitelspuren löschen
 	Version {version}	Version {version}
 	Source code on GitHub	Quellcode auf GitHub
-	Report an issue	Problem melden
 	MIT OR Apache-2.0. Fonts: Inter, Noto Serif and JetBrains Mono (SIL OFL 1.1).	MIT OR Apache-2.0. Schriften: Inter, Noto Serif und JetBrains Mono (SIL OFL 1.1).
 	just now	gerade eben
 	{n} s ago	vor {n} s
@@ -3605,7 +3603,6 @@
 	Opens in your web browser: {url}	Wird in deinem Webbrowser geöffnet: {url}
 	Saves this session's log and shows it in your file manager.	Speichert das Protokoll dieser Sitzung und zeigt es in deinem Dateimanager.
 	Shows a report on this computer.	Zeigt einen Bericht über diesen Computer.
-	Shows the version, community links and credits in a FilmCraft window.	Zeigt Version, Community-Links und Credits in einem FilmCraft-Fenster.
 	Couldn't open your web browser	Dein Webbrowser konnte nicht geöffnet werden
 	Open this address in your browser yourself:	Öffne diese Adresse selbst in deinem Browser:
 

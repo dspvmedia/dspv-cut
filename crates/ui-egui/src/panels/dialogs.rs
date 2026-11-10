@@ -38,8 +38,8 @@ pub fn show(app: &mut FilmcraftApp, ctx: &egui::Context) {
     let mut open = true;
     match d {
         Dialog::About => {
-            egui::Window::new(tl!("About FilmCraft"))
-                .id(egui::Id::unique("About FilmCraft"))
+            egui::Window::new(tl!("About DSPV Cut"))
+                .id(egui::Id::unique("About DSPV Cut"))
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(false)
@@ -420,7 +420,7 @@ fn delete_tracks(app: &mut FilmcraftApp, ctx: &egui::Context) -> bool {
     keep
 }
 
-/// Help ▸ About FilmCraft, in three tabs: About (version, credit and the source code links),
+/// Help ▸ About DSPV Cut, in three tabs: About (version, credit and the source code links),
 /// Contributors and Models (the credits compiled in from `contributors/contributors.json`, see
 /// `crate::credits` and docs/contributors.md).
 ///
@@ -455,11 +455,13 @@ fn about(app: &mut FilmcraftApp, ui: &mut egui::Ui) {
     }
 }
 
-/// About ▸ About: version, licence and the source code links. (DSPV fork: our wordmark, a plain
-/// "based on FilmCraft" credit, and none of upstream's ArtCraft Discord and website buttons: the
-/// ArtCraft brand terms do not let a modified version present itself as part of that community.)
+/// About ▸ About: name, engine version, licence and the source code link. (DSPV fork: our name and
+/// wordmark, a plain "based on FilmCraft" credit, and none of upstream's ArtCraft Discord and website
+/// buttons: the ArtCraft brand terms do not let a modified version present itself as part of that
+/// community. The version is the editing engine's, labelled so: DSPV Cut's own release number is set
+/// by its app packaging, not here. No "Report an issue": the fork has no issue tracker.)
 ///
-/// Automation ids: `about.github`, `about.reportIssue`.
+/// Automation ids: `about.github`.
 fn about_tab(app: &mut FilmcraftApp, ui: &mut egui::Ui) {
     use crate::icons::{self, Icon};
     use crate::links;
@@ -469,8 +471,8 @@ fn about_tab(app: &mut FilmcraftApp, ui: &mut egui::Ui) {
     let (r, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 30.0), egui::Sense::hover());
     crate::brand::paint_wordmark(ui, egui::pos2(r.min.x, r.center().y), 20.0, app.ui.dark);
     ui.add_space(6.0);
-    ui.heading("FilmCraft");
-    ui.label(tlf!("Version {version}", version = env!("CARGO_PKG_VERSION")));
+    ui.heading("DSPV Cut");
+    ui.label(tlf!("Engine {version}", version = env!("CARGO_PKG_VERSION")));
     // DSPV fork: a plain English literal on purpose, not tl!. Upstream's translated sentence ("Part of
     // the ArtCraft family") may not be shown by a modified version, and its translations are removed
     // from the catalogs; this credit stays in English until it has reviewed translations.
@@ -504,7 +506,6 @@ fn about_tab(app: &mut FilmcraftApp, ui: &mut egui::Ui) {
         }
     };
     link(ui, "github", Icon::Code, tl!("Source code on GitHub"), links::GITHUB, false);
-    link(ui, "reportIssue", Icon::Code, tl!("Report an issue"), links::ISSUES, false);
     ui.add_space(10.0);
     ui.label(egui::RichText::new(tl!("MIT OR Apache-2.0. Fonts: Inter, Noto Serif and JetBrains Mono (SIL OFL 1.1).")).small().color(t.text_dim));
 }

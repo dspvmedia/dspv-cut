@@ -16,7 +16,7 @@
 #     (not 効果), ぼかし, 音量, ビデオ, 再生ヘッド, イン点/アウト点.
 #   - "Horizontal"/"Vertical" are 水平/垂直 (guides, blur, axes); vertical text is "Vertical Text".
 
-	About FilmCraft	FilmCraft について
+	About DSPV Cut	DSPV Cut について
 	Check for Updates…	アップデートを確認…
 	Checking for updates…	アップデートを確認中…
 	Could not check for updates:\n{error}	アップデートを確認できませんでした:\n{error}
@@ -143,8 +143,8 @@
 	File	ファイル
 	File…	ファイル…
 	Fill frame	フレームを埋める
-	FilmCraft Help…	FilmCraft ヘルプ…
-	FilmCraft on GitHub	GitHub の FilmCraft
+	DSPV Cut Help…	DSPV Cut ヘルプ…
+	DSPV Cut on GitHub	GitHub の DSPV Cut
 	Find Next	次を検索
 	Find…	検索…
 	Fit	合わせる
@@ -284,7 +284,6 @@
 	Render Selection	選択範囲をレンダリング
 	Replace Fonts in Projects…	プロジェクト内のフォントを置換…
 	Replace With Clip	クリップで置換
-	Report an Issue…	問題を報告…
 	Reset All Parameters	すべてのパラメーターをリセット
 	Reset Duration	長さをリセット
 	Reset to Saved Layout	保存したレイアウトにリセット
@@ -427,7 +426,6 @@
 	All Empty Tracks	すべての空のトラック
 	Version {version}	バージョン {version}
 	Source code on GitHub	GitHub のソースコード
-	Report an issue	問題を報告
 	MIT OR Apache-2.0. Fonts: Inter, Noto Serif and JetBrains Mono (SIL OFL 1.1).	MIT OR Apache-2.0。フォント: Inter、Noto Serif、JetBrains Mono (SIL OFL 1.1)。
 	just now	たった今
 	{n} s ago	{n} 秒前
@@ -3242,9 +3240,9 @@
 	QuickTime, ProRes 4444 XQ (4:4:4), 24-bit 48 kHz PCM	QuickTime、ProRes 4444 XQ (4:4:4)、24-bit 48 kHz PCM
 	QuickTime, ProRes 422, 24-bit 48 kHz PCM	QuickTime、ProRes 422、24-bit 48 kHz PCM
 	Settings	設定
-	Hide FilmCraft	FilmCraft を隠す
+	Hide DSPV Cut	DSPV Cut を隠す
 	Hide Others	ほかを隠す
-	Quit FilmCraft	FilmCraft を終了
+	Quit DSPV Cut	DSPV Cut を終了
 	Rate Stretch Tool	レートストレッチツール
 	Razor Tool	カミソリツール
 	Rectangle Tool	長方形ツール
@@ -3625,7 +3623,6 @@
 	Delete this preset	このプリセットを削除
 	Saves this session's log and shows it in your file manager.	このセッションのログを保存し、ファイルマネージャーで表示します。
 	Shows a report on this computer.	このコンピューターのレポートを表示します。
-	Shows the version, community links and credits in a FilmCraft window.	バージョン、コミュニティへのリンク、クレジットを FilmCraft のウィンドウに表示します。
 	Looks for a newer FilmCraft release and offers to update.	FilmCraft の新しいリリースを確認し、アップデートを提案します。
 	Couldn't open your web browser	ウェブブラウザーを開けませんでした
 	Open this address in your browser yourself:	このアドレスをご自身でブラウザーで開いてください：

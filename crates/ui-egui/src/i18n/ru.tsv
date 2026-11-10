@@ -3,7 +3,7 @@
 # Full interface coverage: every string of the reference catalog is translated into Russian with
 # ordinary video-editing vocabulary. Clean-room: written from the plain meaning of the English
 # text; no proprietary localization resource, string table or product interface was consulted.
-	About FilmCraft	О FilmCraft
+	About DSPV Cut	О DSPV Cut
 	Add Audio Submix Track	Добавить дорожку подмикширования аудио
 	Add Caption at Playhead	Добавить субтитр в позиции курсора
 	Add Chapter Marker…	Добавить маркер главы…
@@ -121,8 +121,8 @@
 	File	Файл
 	File…	Файл…
 	Fill frame	Заполнить кадр
-	FilmCraft Help…	Справка FilmCraft…
-	FilmCraft on GitHub	FilmCraft на GitHub
+	DSPV Cut Help…	Справка DSPV Cut…
+	DSPV Cut on GitHub	DSPV Cut на GitHub
 	Find Next	Найти далее
 	Find…	Найти…
 	Fit	Вписать
@@ -259,7 +259,6 @@
 	Render Selection	Визуализировать выделение
 	Replace Fonts in Projects…	Заменить шрифты в проектах…
 	Replace With Clip	Заменить клипом
-	Report an Issue…	Сообщить о проблеме…
 	Reset All Parameters	Сбросить все параметры
 	Reset Duration	Сбросить длительность
 	Reset to Saved Layout	Сбросить к сохранённому макету
@@ -404,7 +403,6 @@
 	Delete Empty Caption Tracks	Удалить пустые дорожки субтитров
 	Version {version}	Версия {version}
 	Source code on GitHub	Исходный код на GitHub
-	Report an issue	Сообщить о проблеме
 	MIT OR Apache-2.0. Fonts: Inter, Noto Serif and JetBrains Mono (SIL OFL 1.1).	MIT OR Apache-2.0. Шрифты: Inter, Noto Serif и JetBrains Mono (SIL OFL 1.1).
 	just now	только что
 	{n} s ago	{n} с назад
@@ -1820,7 +1818,7 @@
 	Height	Высота
 	Hexagon	Шестиугольник
 	Hide Back Face	Скрыть обратную сторону
-	Hide FilmCraft	Скрыть FilmCraft
+	Hide DSPV Cut	Скрыть DSPV Cut
 	Hide Others	Скрыть остальные
 	High	Высокий
 	High Cutoff	Срез ВЧ
@@ -3223,7 +3221,7 @@
 	QuickTime, ProRes 4444 (4:4:4) with alpha channel, 24-bit 48 kHz PCM	QuickTime, ProRes 4444 (4:4:4) с альфа-каналом, PCM 24 бит, 48 кГц
 	QuickTime, ProRes 4444 XQ (4:4:4), 24-bit 48 kHz PCM	QuickTime, ProRes 4444 XQ (4:4:4), PCM 24 бит, 48 кГц
 	QuickTime, ProRes 422, 24-bit 48 kHz PCM	QuickTime, ProRes 422, PCM 24 бит, 48 кГц
-	Quit FilmCraft	Выйти из FilmCraft
+	Quit DSPV Cut	Выйти из DSPV Cut
 	Rate Stretch Tool	Растяжение скорости
 	Razor Tool	Лезвие
 	Rectangle Tool	Прямоугольник
@@ -3585,7 +3583,6 @@
 	Opens in your web browser: {url}	Откроется в браузере: {url}
 	Saves this session's log and shows it in your file manager.	Сохраняет журнал этого сеанса и показывает его в файловом менеджере.
 	Shows a report on this computer.	Показывает отчёт о компьютере.
-	Shows the version, community links and credits in a FilmCraft window.	Показывает версию, ссылки сообщества и список участников в окне FilmCraft.
 	Couldn't open your web browser	Не удалось открыть браузер
 	Open this address in your browser yourself:	Этот адрес нужно открыть в браузере вручную:
 	Reset Interface Zoom	Сбросить масштаб интерфейса

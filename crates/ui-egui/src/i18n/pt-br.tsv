@@ -18,7 +18,7 @@
 # dissolve = dissolução, scopes = escopos, highlights = realces, offline = offline, legacy = legado,
 # preferences (also the native macOS Settings menu) = Preferências, settings = configurações.
 
-	About FilmCraft	Sobre o FilmCraft
+	About DSPV Cut	Sobre o DSPV Cut
 	Add Audio Submix Track	Adicionar faixa de submixagem de áudio
 	Add Caption at Playhead	Adicionar legenda no cursor de reprodução
 	Add Chapter Marker…	Adicionar marcador de capítulo…
@@ -140,8 +140,8 @@
 	File	Arquivo
 	File…	Arquivo…
 	Fill frame	Preencher quadro
-	FilmCraft Help…	Ajuda do FilmCraft…
-	FilmCraft on GitHub	FilmCraft no GitHub
+	DSPV Cut Help…	Ajuda do DSPV Cut…
+	DSPV Cut on GitHub	DSPV Cut no GitHub
 	Find Next	Localizar próximo
 	Find…	Localizar…
 	Fit	Ajustar
@@ -279,7 +279,6 @@
 	Render Selection	Renderizar seleção
 	Replace Fonts in Projects…	Substituir fontes em projetos…
 	Replace With Clip	Substituir por clipe
-	Report an Issue…	Relatar um problema…
 	Reset All Parameters	Redefinir todos os parâmetros
 	Reset Duration	Redefinir duração
 	Reset to Saved Layout	Redefinir para o layout salvo
@@ -424,7 +423,6 @@
 	Delete Empty Caption Tracks	Excluir faixas de legendas vazias
 	Version {version}	Versão {version}
 	Source code on GitHub	Código-fonte no GitHub
-	Report an issue	Relatar um problema
 	MIT OR Apache-2.0. Fonts: Inter, Noto Serif and JetBrains Mono (SIL OFL 1.1).	MIT OR Apache-2.0. Fontes: Inter, Noto Serif e JetBrains Mono (SIL OFL 1.1).
 	just now	agora mesmo
 	{n} s ago	há {n} s
@@ -3235,7 +3233,7 @@
 	QuickTime, ProRes 4444 (4:4:4) with alpha channel, 24-bit 48 kHz PCM	QuickTime, ProRes 4444 (4:4:4) com canal alfa, PCM de 24 bits e 48 kHz
 	QuickTime, ProRes 4444 XQ (4:4:4), 24-bit 48 kHz PCM	QuickTime, ProRes 4444 XQ (4:4:4), PCM de 24 bits e 48 kHz
 	QuickTime, ProRes 422, 24-bit 48 kHz PCM	QuickTime, ProRes 422, PCM de 24 bits e 48 kHz
-	Quit FilmCraft	Sair do FilmCraft
+	Quit DSPV Cut	Sair do DSPV Cut
 	Rate Stretch Tool	Ferramenta Alongamento de taxa
 	Razor Tool	Ferramenta Lâmina
 	Rectangle Tool	Ferramenta Retângulo

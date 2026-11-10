@@ -72,7 +72,7 @@
 	AAF Export Settings	AAF 내보내기 설정
 	AAF…	AAF…
 	About	정보
-	About FilmCraft	FilmCraft 정보
+	About DSPV Cut	DSPV Cut 정보
 	Accent Color	강조 색상
 	Accessible color contrast	접근성 색상 대비
 	Animate zoom, scrolling and menus	확대/축소, 스크롤 및 메뉴 애니메이션
@@ -1165,10 +1165,10 @@
 	Film Roll	필름 롤
 	FilmCraft always composites in linear light	FilmCraft는 항상 선형 광원으로 합성합니다
 	FilmCraft Graphics Template	FilmCraft 그래픽 템플릿
-	FilmCraft Help…	FilmCraft 도움말…
+	DSPV Cut Help…	DSPV Cut 도움말…
 	FilmCraft hit an error	FilmCraft 오류 발생
 	FilmCraft keeps the rest of the RAM free for other applications.	FilmCraft는 나머지 RAM을 다른 앱용으로 비워 둡니다.
-	FilmCraft on GitHub	GitHub의 FilmCraft
+	DSPV Cut on GitHub	GitHub의 DSPV Cut
 	FilmCraft Project	FilmCraft 프로젝트
 	FilmCraft quit unexpectedly while “{name}” had unsaved changes.	“{name}”의 변경 사항을 저장하지 않은 채 FilmCraft가 비정상 종료되었습니다.
 	FilmCraft was closed while “{name}” had unsaved changes.	“{name}”의 변경 사항을 저장하지 않은 채 FilmCraft가 닫혔습니다.
@@ -2406,7 +2406,7 @@
 	QuickTime, ProRes 4444 (4:4:4) with alpha channel, 24-bit 48 kHz PCM	QuickTime, ProRes 4444 (4:4:4) 알파 채널 포함, 24비트 48 kHz PCM
 	QuickTime, ProRes 4444 (4:4:4), 24-bit 48 kHz PCM	QuickTime, ProRes 4444 (4:4:4), 24비트 48 kHz PCM
 	QuickTime, ProRes 4444 XQ (4:4:4), 24-bit 48 kHz PCM	QuickTime, ProRes 4444 XQ (4:4:4), 24비트 48 kHz PCM
-	Quit FilmCraft	FilmCraft 종료
+	Quit DSPV Cut	DSPV Cut 종료
 	Radial	방사형
 	Radial Blur	방사형 흐림
 	Radial Ramp	방사형 램프
@@ -2536,8 +2536,6 @@
 	Replace:	바꾸기:
 	Replaced {n} font uses	글꼴 사용 {n}곳 바꿈
 	Replicate	복제
-	Report an issue	문제 신고
-	Report an Issue…	문제 신고…
 	Reset	재설정
 	Reset All Parameters	모든 매개변수 재설정
 	Reset Duration	지속 시간 재설정
@@ -3595,7 +3593,6 @@
 	MXF export writes integer PCM only	MXF 내보내기는 정수 PCM만 기록합니다
 	Saves this session's log and shows it in your file manager.	이 세션의 로그를 저장하고 파일 관리자에서 보여 줍니다.
 	Shows a report on this computer.	이 컴퓨터에 대한 보고서를 보여 줍니다.
-	Shows the version, community links and credits in a FilmCraft window.	FilmCraft 창에 버전, 커뮤니티 링크, 제작진을 보여 줍니다.
 	Couldn't open your web browser	웹 브라우저를 열 수 없습니다
 	Open this address in your browser yourself:	이 주소를 브라우저에서 직접 여세요:
 # View > Reset Interface Zoom (#2253).

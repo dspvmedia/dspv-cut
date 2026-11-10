@@ -4,7 +4,7 @@
 # using Ukrainian video-editing vocabulary. No proprietary localization resources were used.
 # Core menu coverage; other interface strings fall back to English.
 
-	About FilmCraft	Про FilmCraft
+	About DSPV Cut	Про DSPV Cut
 	Add Audio Submix Track	Додати доріжку підміксу аудіо
 	Add Caption at Playhead	Додати субтитр у позиції курсора відтворення
 	Add Chapter Marker…	Додати маркер розділу…
@@ -125,8 +125,8 @@
 	File	Файл
 	File…	Файл…
 	Fill frame	Заповнити кадр
-	FilmCraft Help…	Довідка FilmCraft…
-	FilmCraft on GitHub	FilmCraft на GitHub
+	DSPV Cut Help…	Довідка DSPV Cut…
+	DSPV Cut on GitHub	DSPV Cut на GitHub
 	Find Next	Знайти далі
 	Find…	Знайти…
 	Fit	Умістити
@@ -261,7 +261,6 @@
 	Render Selection	Рендерити виділення
 	Replace Fonts in Projects…	Замінити шрифти в проєктах…
 	Replace With Clip	Замінити кліпом
-	Report an Issue…	Повідомити про проблему…
 	Reset All Parameters	Скинути всі параметри
 	Reset Duration	Скинути тривалість
 	Reset to Saved Layout	Відновити збережене компонування
