@@ -14,7 +14,7 @@
 # ProRes, LUFS, H.264…) keep their spelling, as do key-cap names (Shift, Alt, Ctrl, Cmd, Opt, Esc).
 # Commands are imperatives addressed with "tu"; decimals use a comma (29,97 fps).
 
-	About FilmCraft	Informazioni su FilmCraft
+	About DSPV Cut	Informazioni su DSPV Cut
 	Add Audio Submix Track	Aggiungi traccia submix audio
 	Add Caption at Playhead	Aggiungi sottotitolo all'indicatore di riproduzione
 	Add Chapter Marker…	Aggiungi marcatore di capitolo…
@@ -136,8 +136,8 @@
 	File	File
 	File…	File…
 	Fill frame	Riempi il fotogramma
-	FilmCraft Help…	Guida di FilmCraft…
-	FilmCraft on GitHub	FilmCraft su GitHub
+	DSPV Cut Help…	Guida di DSPV Cut…
+	DSPV Cut on GitHub	DSPV Cut su GitHub
 	Find Next	Trova successivo
 	Find…	Trova…
 	Fit	Adatta
@@ -272,7 +272,6 @@
 	Render Selection	Esegui rendering selezione
 	Replace Fonts in Projects…	Sostituisci font nei progetti…
 	Replace With Clip	Sostituisci con clip
-	Report an Issue…	Segnala un problema…
 	Reset All Parameters	Reimposta tutti i parametri
 	Reset Duration	Reimposta durata
 	Reset to Saved Layout	Ripristina layout salvato
@@ -417,7 +416,6 @@
 	Delete Empty Caption Tracks	Elimina tracce sottotitoli vuote
 	Version {version}	Versione {version}
 	Source code on GitHub	Codice sorgente su GitHub
-	Report an issue	Segnala un problema
 	MIT OR Apache-2.0. Fonts: Inter, Noto Serif and JetBrains Mono (SIL OFL 1.1).	MIT OR Apache-2.0. Font: Inter, Noto Serif e JetBrains Mono (SIL OFL 1.1).
 	just now	proprio ora
 	{n} s ago	{n} s fa
@@ -3232,7 +3230,7 @@
 	QuickTime, ProRes 4444 (4:4:4) with alpha channel, 24-bit 48 kHz PCM	QuickTime, ProRes 4444 (4:4:4) con canale alfa, PCM 24 bit 48 kHz
 	QuickTime, ProRes 4444 XQ (4:4:4), 24-bit 48 kHz PCM	QuickTime, ProRes 4444 XQ (4:4:4), PCM 24 bit 48 kHz
 	QuickTime, ProRes 422, 24-bit 48 kHz PCM	QuickTime, ProRes 422, PCM 24 bit 48 kHz
-	Quit FilmCraft	Esci da FilmCraft
+	Quit DSPV Cut	Esci da DSPV Cut
 	Rate Stretch Tool	Strumento Allungamento velocità
 	Razor Tool	Strumento Lama
 	Rectangle Tool	Strumento Rettangolo
@@ -3600,7 +3598,6 @@
 	MXF export writes integer PCM only	L'esportazione MXF scrive solo PCM intero
 	Saves this session's log and shows it in your file manager.	Salva il registro di questa sessione e lo mostra nel gestore file.
 	Shows a report on this computer.	Mostra un rapporto su questo computer.
-	Shows the version, community links and credits in a FilmCraft window.	Mostra la versione, i link della community e i riconoscimenti in una finestra di FilmCraft.
 	Couldn't open your web browser	Impossibile aprire il browser web
 	Open this address in your browser yourself:	Apri tu questo indirizzo nel browser:
 # View > Reset Interface Zoom (#2253).

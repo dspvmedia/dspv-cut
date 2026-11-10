@@ -5,17 +5,27 @@
 //! modified version present itself as an ArtCraft product or part of its community, so those links
 //! are removed; the only credit is the plain-text "Based on FilmCraft by the ArtCraft team" in
 //! About. `no_artcraft_community_links` below keeps them from coming back with an upstream sync.
+//!
+//! DSPV fork: these links also pointed at upstream's repository, its issue tracker and its docs, and
+//! Help and About said FilmCraft. DSPV Cut is a modified build, so its links go to the public fork it
+//! is built from (the `dspv/nlog-transform` branch: the fork's `main` mirrors upstream), and "Report
+//! an Issue…" is gone: the fork has no issue tracker, and DSPV Cut problems go to DSPV directly
+//! (Help ▸ Reveal Log Files…). `dspv_cut_help_and_about` below keeps upstream's name and links out.
 
-/// The app's short name, used in the website and repository URLs.
-pub const APP: &str = "filmcraft";
-
-/// FilmCraft's source repository.
-pub const GITHUB: &str = "https://github.com/storytold/filmcraft";
-/// New issue on FilmCraft's repository.
-pub const ISSUES: &str = "https://github.com/storytold/filmcraft/issues";
+/// The public fork DSPV Cut is built from.
+pub const REPO: &str = "https://github.com/dspvmedia/dspv-cut";
+/// The fork's branch DSPV Cut is built from.
+pub const BRANCH: &str = "dspv/nlog-transform";
+/// DSPV Cut's source code: the fork at that branch.
+pub const GITHUB: &str = "https://github.com/dspvmedia/dspv-cut/tree/dspv/nlog-transform";
 
 /// (command id, label, url) for every link, in menu order.
-pub const ALL: [(&str, &str, &str); 2] = [("help.github", "FilmCraft on GitHub", GITHUB), ("help.reportIssue", "Report an Issue…", ISSUES)];
+pub const ALL: [(&str, &str, &str); 1] = [("help.github", "DSPV Cut on GitHub", GITHUB)];
+
+/// A page of the editor's documentation (`docs/` on that branch), e.g. `"project-files.md#settings"`.
+pub fn doc(page: &str) -> String {
+    format!("{REPO}/blob/{BRANCH}/docs/{page}")
+}
 
 /// A link the web browser couldn't open (`ui.failedLink`): the address and the reason.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -30,7 +40,7 @@ pub fn url_for(command: &str) -> Option<&'static str> {
 }
 
 /// What a Help menu item does, shown when the pointer rests on it: just the address a link opens
-/// in the web browser, or what an item that stays inside FilmCraft does.
+/// in the web browser, or what an item that stays inside DSPV Cut does.
 pub fn menu_hint(command: &str) -> Option<String> {
     let url = if command == "help.filmcraftHelp" { Some(crate::panels::keyboard::HELP_URL) } else { url_for(command) };
     if let Some(url) = url {
@@ -40,7 +50,7 @@ pub fn menu_hint(command: &str) -> Option<String> {
         match command {
             "help.revealLogFiles" => tl!("Saves this session's log and shows it in your file manager."),
             "help.systemCompatibilityReport" => tl!("Shows a report on this computer."),
-            "app.about" => tl!("Shows the version, community links and credits in a FilmCraft window."),
+            "app.about" => tl!("Shows the version, source code link and credits in a DSPV Cut window."),
             // DSPV patch: updates come from DSPV Hub, so the command no longer looks for upstream's releases
             "app.checkForUpdates" => tl!("Says where updates come from: DSPV Hub (Apps)."),
             _ => return None,
@@ -119,10 +129,12 @@ mod tests {
 
     #[test]
     fn urls_follow_the_repository_scheme() {
-        assert_eq!(GITHUB, format!("https://github.com/storytold/{APP}"));
+        assert_eq!(GITHUB, format!("{REPO}/tree/{BRANCH}"));
+        assert_eq!(doc("keyboard.md"), format!("{REPO}/blob/{BRANCH}/docs/keyboard.md"));
         assert!(ALL.iter().all(|(id, _, u)| id.starts_with("help.") && u.starts_with("https://")));
         assert_eq!(url_for("help.github"), Some(GITHUB));
         assert_eq!(url_for("help.discord"), None);
+        assert_eq!(url_for("help.reportIssue"), None, "the fork has no issue tracker");
         assert_eq!(url_for("help.nope"), None);
     }
 
@@ -175,6 +187,32 @@ mod tests {
         assert!(ALL.iter().all(|(_, label, url)| !label.contains("ArtCraft") && !url.contains("artcraft")), "{ALL:?}");
     }
 
+    /// DSPV fork: Help, About and Quit say DSPV Cut, and every Help link goes to the public fork
+    /// DSPV Cut is built from, never upstream's repository, issue tracker or docs. Upstream syncs
+    /// bring their name and links back, so this fails the merge instead. The command ids stay
+    /// upstream's (`help.filmcraftHelp`, …): shortcuts, presets and the control protocol key on them.
+    #[test]
+    fn dspv_cut_help_and_about() {
+        for url in [GITHUB, crate::panels::keyboard::HELP_URL, doc("project-files.md").as_str()] {
+            assert!(url.starts_with(REPO), "{url} is not the fork");
+        }
+        let help = crate::menus::UI_COMMANDS.iter().chain(crate::panels::keyboard::COMMANDS);
+        let named: Vec<_> = help.filter(|c| c.menu.first() == Some(&"Help") || c.id == "app.quit").collect();
+        assert!(named.len() >= 6, "{:?}", named.iter().map(|c| c.id).collect::<Vec<_>>());
+        for c in named {
+            assert!(!c.label.contains("FilmCraft"), "{} is labelled {:?}", c.id, c.label);
+            assert!(c.id != "help.reportIssue", "the fork has no issue tracker");
+        }
+        assert!(ALL.iter().all(|(_, label, url)| !label.contains("FilmCraft") && url.starts_with(REPO)), "{ALL:?}");
+        // the macOS app menu's own Hide and Quit items
+        assert!(crate::menus::NATIVE_APP_MENU.iter().all(|l| !l.contains("FilmCraft")), "{:?}", crate::menus::NATIVE_APP_MENU);
+        // About: the window and heading name DSPV Cut; FilmCraft appears only in the credit.
+        let about = include_str!("panels/dialogs.rs");
+        let code = about.lines().filter(|l| !l.trim_start().starts_with("//"));
+        let named: Vec<_> = code.filter(|l| l.contains("FilmCraft") && !l.contains("Based on FilmCraft by the ArtCraft team")).collect();
+        assert!(named.is_empty(), "About still says FilmCraft: {named:?}");
+    }
+
     #[test]
     fn links_open_through_the_host_hook() {
         // #642: on the desktop every link (Help menu, About, Import screen) must
@@ -200,12 +238,12 @@ mod tests {
 
         // A failing opener falls back to `ctx.open_url` instead of losing the click.
         app.hooks.open_url = Some(Box::new(|_: &str| Err("no browser".into())));
-        open(&mut app, &ctx, ISSUES);
+        open(&mut app, &ctx, crate::panels::keyboard::HELP_URL);
         let fallback: Vec<String> =
             ctx.output(|o| o.commands.iter().filter_map(|c| if let egui::OutputCommand::OpenUrl(u) = c { Some(u.url.clone()) } else { None }).collect());
-        assert_eq!(fallback, [ISSUES]);
+        assert_eq!(fallback, [crate::panels::keyboard::HELP_URL]);
         // ... and keeps the address on screen with the reason until the dialog is closed
-        assert_eq!(app.ui.failed_link, Some(FailedLink { url: ISSUES.into(), error: "no browser".into() }));
+        assert_eq!(app.ui.failed_link, Some(FailedLink { url: crate::panels::keyboard::HELP_URL.into(), error: "no browser".into() }));
     }
 
     /// The failed-link dialog shows the address until it is closed, and Copy copies it.

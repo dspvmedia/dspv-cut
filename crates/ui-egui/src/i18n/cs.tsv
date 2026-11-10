@@ -14,7 +14,7 @@
 #   escapes  \n  \t  \\ inside a column. Keep {name} placeholders in both columns.
 #   lines starting with # and blank lines are ignored.
 
-	About FilmCraft	O aplikaci FilmCraft
+	About DSPV Cut	O aplikaci DSPV Cut
 	Add Audio Submix Track	Přidat stopu zvukové podskupiny
 	Add Caption at Playhead	Přidat titulek na pozici přehrávací hlavy
 	Add Chapter Marker…	Přidat značku kapitoly…
@@ -132,8 +132,8 @@
 	File	Soubor
 	File…	Soubor…
 	Fill frame	Vyplnit snímek
-	FilmCraft Help…	Nápověda k FilmCraft…
-	FilmCraft on GitHub	FilmCraft na GitHubu
+	DSPV Cut Help…	Nápověda k DSPV Cut…
+	DSPV Cut on GitHub	DSPV Cut na GitHubu
 	Find Next	Najít další
 	Find…	Najít…
 	Fit	Přizpůsobit
@@ -165,7 +165,7 @@
 	Guide Templates	Šablony vodítek
 	Help	Nápověda
 	Hide All Caption Tracks	Skrýt všechny stopy titulků
-	Hide FilmCraft	Skrýt FilmCraft
+	Hide DSPV Cut	Skrýt DSPV Cut
 	Hide Others	Skrýt ostatní
 	High Quality Playback	Přehrávání ve vysoké kvalitě
 	History	Historie
@@ -270,7 +270,6 @@
 	Render Selection	Vykreslit výběr
 	Replace Fonts in Projects…	Nahradit písma v projektech…
 	Replace With Clip	Nahradit klipem
-	Report an Issue…	Nahlásit problém…
 	Reset All Parameters	Obnovit všechny parametry
 	Reset Duration	Obnovit dobu trvání
 	Reset to Saved Layout	Obnovit uložené rozložení
@@ -414,7 +413,6 @@
 	Delete Empty Caption Tracks	Odstranit prázdné stopy titulků
 	Version {version}	Verze {version}
 	Source code on GitHub	Zdrojový kód na GitHubu
-	Report an issue	Nahlásit problém
 	MIT OR Apache-2.0. Fonts: Inter, Noto Serif and JetBrains Mono (SIL OFL 1.1).	MIT OR Apache-2.0. Písma: Inter, Noto Serif a JetBrains Mono (SIL OFL 1.1).
 	just now	právě teď
 	{n} s ago	před {n} s
@@ -3217,7 +3215,7 @@
 	QuickTime, ProRes 4444 (4:4:4) with alpha channel, 24-bit 48 kHz PCM	QuickTime, ProRes 4444 (4:4:4) s alfa kanálem, 24bitové PCM 48 kHz
 	QuickTime, ProRes 4444 XQ (4:4:4), 24-bit 48 kHz PCM	QuickTime, ProRes 4444 XQ (4:4:4), 24bitové PCM 48 kHz
 	QuickTime, ProRes 422, 24-bit 48 kHz PCM	QuickTime, ProRes 422, 24bitové PCM 48 kHz
-	Quit FilmCraft	Ukončit FilmCraft
+	Quit DSPV Cut	Ukončit DSPV Cut
 	Rate Stretch Tool	Nástroj Změna rychlosti
 	Razor Tool	Nástroj Žiletka
 	Rectangle Tool	Nástroj Obdélník
@@ -3598,7 +3596,6 @@
 	Recent	Nedávné
 	Saves this session's log and shows it in your file manager.	Uloží protokol této relace a zobrazí jej ve správci souborů.
 	Shows a report on this computer.	Zobrazí zprávu o tomto počítači.
-	Shows the version, community links and credits in a FilmCraft window.	Zobrazí verzi, odkazy na komunitu a poděkování v okně FilmCraft.
 	no Korean font is installed on this system; the interface stays in English	v systému není nainstalováno korejské písmo; rozhraní zůstává v angličtině
 	Animate zoom, scrolling and menus	Animovat přibližování, posouvání a nabídky
 	No matching text.	Žádný odpovídající text.

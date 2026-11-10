@@ -21,7 +21,7 @@
 # thumbnail = gambar mini, voice-over = sulih suara, default = bawaan, preferences (also the native
 # macOS Settings menu) = Preferensi, settings = pengaturan.
 
-	About FilmCraft	Tentang FilmCraft
+	About DSPV Cut	Tentang DSPV Cut
 	Add Audio Submix Track	Tambah Trek Submix Audio
 	Add Caption at Playhead	Tambah Takarir di Kepala Putar
 	Add Chapter Marker…	Tambah Penanda Bab…
@@ -143,8 +143,8 @@
 	File	Berkas
 	File…	Berkas…
 	Fill frame	Isi bingkai
-	FilmCraft Help…	Bantuan FilmCraft…
-	FilmCraft on GitHub	FilmCraft di GitHub
+	DSPV Cut Help…	Bantuan DSPV Cut…
+	DSPV Cut on GitHub	DSPV Cut di GitHub
 	Find Next	Cari Berikutnya
 	Find…	Cari…
 	Fit	Pas
@@ -282,7 +282,6 @@
 	Render Selection	Render Pilihan
 	Replace Fonts in Projects…	Ganti Font di Proyek…
 	Replace With Clip	Ganti dengan Klip
-	Report an Issue…	Laporkan Masalah…
 	Reset All Parameters	Atur Ulang Semua Parameter
 	Reset Duration	Atur Ulang Durasi
 	Reset to Saved Layout	Kembalikan ke Tata Letak Tersimpan
@@ -427,7 +426,6 @@
 	Delete Empty Caption Tracks	Hapus Trek Takarir Kosong
 	Version {version}	Versi {version}
 	Source code on GitHub	Kode sumber di GitHub
-	Report an issue	Laporkan masalah
 	MIT OR Apache-2.0. Fonts: Inter, Noto Serif and JetBrains Mono (SIL OFL 1.1).	MIT OR Apache-2.0. Font: Inter, Noto Serif dan JetBrains Mono (SIL OFL 1.1).
 	just now	baru saja
 	{n} s ago	{n} dtk lalu
@@ -3238,7 +3236,7 @@
 	QuickTime, ProRes 4444 (4:4:4) with alpha channel, 24-bit 48 kHz PCM	QuickTime, ProRes 4444 (4:4:4) dengan kanal alfa, PCM 24-bit 48 kHz
 	QuickTime, ProRes 4444 XQ (4:4:4), 24-bit 48 kHz PCM	QuickTime, ProRes 4444 XQ (4:4:4), PCM 24-bit 48 kHz
 	QuickTime, ProRes 422, 24-bit 48 kHz PCM	QuickTime, ProRes 422, PCM 24-bit 48 kHz
-	Quit FilmCraft	Keluar dari FilmCraft
+	Quit DSPV Cut	Keluar dari DSPV Cut
 	Rate Stretch Tool	Alat Regang Laju
 	Razor Tool	Alat Silet
 	Rectangle Tool	Alat Persegi Panjang

@@ -16,7 +16,7 @@
 # décalage, overwrite = écraser, scopes = oscilloscopes, preferences (also the native macOS
 # Settings menu) = Préférences, settings = paramètres.
 
-	About FilmCraft	À propos de FilmCraft
+	About DSPV Cut	À propos de DSPV Cut
 	Add Audio Submix Track	Ajouter une piste de sous-mixage audio
 	Add Caption at Playhead	Ajouter un sous-titre à la tête de lecture
 	Add Chapter Marker…	Ajouter un marqueur de chapitre…
@@ -138,8 +138,8 @@
 	File	Fichier
 	File…	Fichier…
 	Fill frame	Remplir l'image
-	FilmCraft Help…	Aide de FilmCraft…
-	FilmCraft on GitHub	FilmCraft sur GitHub
+	DSPV Cut Help…	Aide de DSPV Cut…
+	DSPV Cut on GitHub	DSPV Cut sur GitHub
 	Find Next	Rechercher le suivant
 	Find…	Rechercher…
 	Fit	Adapter
@@ -277,7 +277,6 @@
 	Render Selection	Effectuer le rendu de la sélection
 	Replace Fonts in Projects…	Remplacer les polices dans les projets…
 	Replace With Clip	Remplacer par le clip
-	Report an Issue…	Signaler un problème…
 	Reset All Parameters	Réinitialiser tous les paramètres
 	Reset Duration	Réinitialiser la durée
 	Reset to Saved Layout	Réinitialiser la disposition enregistrée
@@ -422,7 +421,6 @@
 	Delete Empty Caption Tracks	Supprimer les pistes de sous-titres vides
 	Version {version}	Version {version}
 	Source code on GitHub	Code source sur GitHub
-	Report an issue	Signaler un problème
 	MIT OR Apache-2.0. Fonts: Inter, Noto Serif and JetBrains Mono (SIL OFL 1.1).	MIT OR Apache-2.0. Polices : Inter, Noto Serif et JetBrains Mono (SIL OFL 1.1).
 	just now	à l'instant
 	{n} s ago	il y a {n} s
@@ -3221,7 +3219,7 @@
 	QuickTime, ProRes 4444 (4:4:4) with alpha channel, 24-bit 48 kHz PCM	QuickTime, ProRes 4444 (4:4:4) avec couche alpha, PCM 24 bits 48 kHz
 	QuickTime, ProRes 4444 XQ (4:4:4), 24-bit 48 kHz PCM	QuickTime, ProRes 4444 XQ (4:4:4), PCM 24 bits 48 kHz
 	QuickTime, ProRes 422, 24-bit 48 kHz PCM	QuickTime, ProRes 422, PCM 24 bits 48 kHz
-	Quit FilmCraft	Quitter FilmCraft
+	Quit DSPV Cut	Quitter DSPV Cut
 	Rate Stretch Tool	Outil Étirement de la vitesse
 	Razor Tool	Outil Cutter
 	Rectangle Tool	Outil Rectangle
@@ -3654,7 +3652,7 @@
 	Previous	Précédent
 	Next	Suivant
 	Enter a valid HH:MM:SS:FF timecode	Saisissez un timecode valide HH:MM:SS:FF
-	Hide FilmCraft	Masquer FilmCraft
+	Hide DSPV Cut	Masquer DSPV Cut
 	Hide Others	Masquer les autres
 	More transport controls	Autres commandes de lecture
 	A file dialog is already open	Une fenêtre de sélection de fichier est déjà ouverte
@@ -3683,7 +3681,6 @@
 	Opens in your web browser: {url}	S'ouvre dans votre navigateur : {url}
 	Saves this session's log and shows it in your file manager.	Enregistre le journal de cette session et l'affiche dans votre gestionnaire de fichiers.
 	Shows a report on this computer.	Affiche un rapport sur cet ordinateur.
-	Shows the version, community links and credits in a FilmCraft window.	Affiche la version, les liens de la communauté et les crédits dans une fenêtre FilmCraft.
 	Couldn't open your web browser	Impossible d'ouvrir votre navigateur
 	Open this address in your browser yourself:	Ouvrez vous-même cette adresse dans votre navigateur :
 	Delete Redoable Actions	Supprimer les actions rétablissables

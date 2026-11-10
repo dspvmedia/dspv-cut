@@ -5,7 +5,7 @@
 # localization resources were used. AI-assisted (Claude Code), not yet reviewed by a native speaker;
 # the wording is shared with storytold/craft-i18n (locales/bs/filmcraft.tsv and common.tsv).
 
-	About FilmCraft	O FilmCraftu
+	About DSPV Cut	O DSPV Cutu
 	Add Audio Submix Track	Dodaj audio podmiks traku
 	Add Caption at Playhead	Dodaj titl na glavu za reprodukciju
 	Add Chapter Marker…	Dodaj marker poglavlja…
@@ -126,8 +126,8 @@
 	File	Datoteka
 	File…	Datoteka…
 	Fill frame	Ispuni kadar
-	FilmCraft Help…	Pomoć za FilmCraft…
-	FilmCraft on GitHub	FilmCraft na GitHubu
+	DSPV Cut Help…	Pomoć za DSPV Cut…
+	DSPV Cut on GitHub	DSPV Cut na GitHubu
 	Find Next	Pronađi sljedeće
 	Find…	Pronađi…
 	Fit	Uklopi
@@ -261,7 +261,6 @@
 	Render Selection	Iscrtaj odabir
 	Replace Fonts in Projects…	Zamijeni fontove u projektima…
 	Replace With Clip	Zamijeni klipom
-	Report an Issue…	Prijavi problem…
 	Reset All Parameters	Vrati sve parametre na početno
 	Reset Duration	Vrati trajanje na početno
 	Reset to Saved Layout	Vrati na sačuvani raspored
@@ -369,7 +368,7 @@
 	FCPXML…	FCPXML…
 	Final Cut Pro XML…	Final Cut Pro XML…
 	General…	Općenito…
-	Hide FilmCraft	Sakrij FilmCraft
+	Hide DSPV Cut	Sakrij DSPV Cut
 	Hide Others	Sakrij ostale
 	Iris	Iris
 	Magenta	Magenta
@@ -377,7 +376,7 @@
 	OMF…	OMF…
 	OpenTimelineIO…	OpenTimelineIO…
 	Proxy	Proksi
-	Quit FilmCraft	Zatvori FilmCraft
+	Quit DSPV Cut	Zatvori DSPV Cut
 	Save Changes to this Workspace	Sačuvaj promjene u ovom radnom prostoru
 	Save as New Workspace…	Sačuvaj kao novi radni prostor…
 	Refresh Changed Media	Osvježi promijenjene medije
@@ -434,7 +433,6 @@
 	Delete Empty Caption Tracks	Izbriši prazne trake titlova
 	Version {version}	Verzija {version}
 	Source code on GitHub	Izvorni kod na GitHubu
-	Report an issue	Prijavi problem
 	MIT OR Apache-2.0. Fonts: Inter, Noto Serif and JetBrains Mono (SIL OFL 1.1).	MIT OR Apache-2.0. Fontovi: Inter, Noto Serif i JetBrains Mono (SIL OFL 1.1).
 	just now	upravo sada
 	{n} s ago	prije {n} s
@@ -3587,7 +3585,6 @@
 	Opens in your web browser: {url}	Otvara se u vašem web pregledniku: {url}
 	Saves this session's log and shows it in your file manager.	Čuva zapisnik ove sesije i prikazuje ga u upravitelju datoteka.
 	Shows a report on this computer.	Prikazuje izvještaj o ovom računaru.
-	Shows the version, community links and credits in a FilmCraft window.	Prikazuje verziju, veze zajednice i zasluge u FilmCraft prozoru.
 	Couldn't open your web browser	Nije moguće otvoriti vaš web preglednik
 	Open this address in your browser yourself:	Sami otvorite ovu adresu u svom pregledniku:
 	The control server is disabled: FILMCRAFT_CONTROL_TOKEN must contain 64 random hex characters (see docs/control-protocol.md)	Kontrolni server je onemogućen: FILMCRAFT_CONTROL_TOKEN mora sadržavati 64 nasumična heksadecimalna znaka (pogledajte docs/control-protocol.md)

@@ -107,10 +107,8 @@ fn project_links_everywhere_and_no_artcraft_community() {
     d.ok("engine.execute", json!({"command": "app.about", "params": {}}));
     d.frames(3);
     let about = d.ids("about.");
-    for id in ["about.github", "about.reportIssue"] {
-        assert!(about.iter().any(|a| a == id), "{id} in {about:?}");
-    }
-    for id in ["about.discord", "about.website", "about.appPage"] {
+    assert!(about.iter().any(|a| a == "about.github"), "about.github in {about:?}");
+    for id in ["about.discord", "about.website", "about.appPage", "about.reportIssue"] {
         assert!(!about.iter().any(|a| a == id), "{id} is gone from {about:?}");
     }
     no_artcraft("the About dialog", &d.ok("ui.elements", json!({"prefix": "about."})).to_string());
@@ -124,7 +122,7 @@ fn project_links_everywhere_and_no_artcraft_community() {
     d.frames(3);
     assert_eq!(d.ids("import.link."), vec!["import.link.github".to_string()]);
     let home = d.ok("ui.elements", json!({"prefix": "import.link."}));
-    assert_eq!(home[0]["label"], json!("FilmCraft on GitHub"), "{home}");
+    assert_eq!(home[0]["label"], json!("DSPV Cut on GitHub"), "{home}");
     no_artcraft("the Home screen", &home.to_string());
     d.snapshot("home");
 }

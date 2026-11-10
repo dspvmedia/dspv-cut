@@ -12,7 +12,7 @@
 # sekwencja, panel = panel, workspace = obszar roboczy, keyframe = klatka kluczowa, caption = napis,
 # preferences = preferencje. Edit types keep their established names (ripple, roll, slip, slide).
 
-	About FilmCraft	O programie FilmCraft
+	About DSPV Cut	O programie DSPV Cut
 	Add Audio Submix Track	Dodaj ścieżkę submiksu audio
 	Add Caption at Playhead	Dodaj napis w miejscu głowicy
 	Add Chapter Marker…	Dodaj znacznik rozdziału…
@@ -130,8 +130,8 @@
 	File	Plik
 	File…	Plik…
 	Fill frame	Wypełnij klatkę
-	FilmCraft Help…	Pomoc FilmCraft…
-	FilmCraft on GitHub	FilmCraft w serwisie GitHub
+	DSPV Cut Help…	Pomoc DSPV Cut…
+	DSPV Cut on GitHub	DSPV Cut w serwisie GitHub
 	Find Next	Znajdź następny
 	Find…	Znajdź…
 	Fit	Dopasuj
@@ -268,7 +268,6 @@
 	Render Selection	Renderuj zaznaczenie
 	Replace Fonts in Projects…	Zastąp czcionki w projektach…
 	Replace With Clip	Zastąp klipem
-	Report an Issue…	Zgłoś problem…
 	Reset All Parameters	Resetuj wszystkie parametry
 	Reset Duration	Resetuj czas trwania
 	Reset to Saved Layout	Przywróć zapisany układ
@@ -412,7 +411,6 @@
 	Delete Empty Caption Tracks	Usuń puste ścieżki napisów
 	Version {version}	Wersja {version}
 	Source code on GitHub	Kod źródłowy w serwisie GitHub
-	Report an issue	Zgłoś problem
 	MIT OR Apache-2.0. Fonts: Inter, Noto Serif and JetBrains Mono (SIL OFL 1.1).	MIT LUB Apache-2.0. Czcionki: Inter, Noto Serif i JetBrains Mono (SIL OFL 1.1).
 	just now	przed chwilą
 	{n} s ago	{n} s temu
@@ -3227,7 +3225,7 @@
 	QuickTime, ProRes 4444 (4:4:4) with alpha channel, 24-bit 48 kHz PCM	QuickTime, ProRes 4444 (4:4:4) z kanałem alfa, PCM 24-bit 48 kHz
 	QuickTime, ProRes 4444 XQ (4:4:4), 24-bit 48 kHz PCM	QuickTime, ProRes 4444 XQ (4:4:4), PCM 24-bit 48 kHz
 	QuickTime, ProRes 422, 24-bit 48 kHz PCM	QuickTime, ProRes 422, PCM 24-bit 48 kHz
-	Quit FilmCraft	Zakończ FilmCraft
+	Quit DSPV Cut	Zakończ DSPV Cut
 	Rate Stretch Tool	Narzędzie Rozciąganie szybkości
 	Razor Tool	Narzędzie Żyletka
 	Rectangle Tool	Narzędzie Prostokąt
@@ -3589,12 +3587,11 @@
 	Opens in your web browser: {url}	Otwiera w przeglądarce: {url}
 	Saves this session's log and shows it in your file manager.	Zapisuje dziennik tej sesji i pokazuje go w menedżerze plików.
 	Shows a report on this computer.	Pokazuje raport o tym komputerze.
-	Shows the version, community links and credits in a FilmCraft window.	Pokazuje wersję, linki społeczności i współtwórców w oknie FilmCraft.
 	Couldn't open your web browser	Nie udało się otworzyć przeglądarki
 	Open this address in your browser yourself:	Otwórz ten adres w przeglądarce samodzielnie:
 	Hardware decoding: Auto uses the system's video decoder (VideoToolbox on macOS, Media Foundation on Windows, VA-API for H.264 and HEVC on Linux) for the streams it supports, and FilmCraft's own decoder for everything else or if the hardware fails. Media that is already open keeps its decoder until it is reopened.	Dekodowanie sprzętowe: Auto używa systemowego dekodera wideo (VideoToolbox w macOS, Media Foundation w Windows, VA-API dla H.264 i HEVC w Linuksie) dla obsługiwanych strumieni, a własnego dekodera FilmCraft dla pozostałych lub gdy sprzęt zawiedzie. Już otwarte multimedia zachowują swój dekoder do ponownego otwarcia.
 	Settings	Ustawienia
-	Hide FilmCraft	Ukryj FilmCraft
+	Hide DSPV Cut	Ukryj DSPV Cut
 	Hide Others	Ukryj pozostałe
 # Added 2026-10-29: strings main gained since the catalog was written.
 	Delete Redoable Actions	Usuń akcje do ponowienia
