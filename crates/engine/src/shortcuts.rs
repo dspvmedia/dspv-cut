@@ -24,7 +24,7 @@
 //! Commands the frontend owns (tools, transport, panels, workspaces) are registered with
 //! [`Shortcuts::register_external`] so they can be listed, bound and resolved here too.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -948,6 +948,24 @@ impl Shortcuts {
         self.bindings.iter().find(|b| same_shortcut_command(&b.command, id) && b.panel.is_none()).map(|b| b.keys.clone())
     }
 
+    /// [`Self::primary`] of every command at once, in one pass over the bindings. The menus ask
+    /// for every command's shortcut on every UI frame (macOS syncs the native menu bar each
+    /// frame); asking [`Self::primary`] per command scanned all the bindings for each one and kept
+    /// the UI thread busy while scrubbing.
+    pub fn primaries(&self) -> HashMap<&str, &str> {
+        let mut out: HashMap<&str, &str> = HashMap::new();
+        for b in self.bindings.iter().filter(|b| b.panel.is_none()) {
+            if shortcut_twins(&b.command) {
+                for twin in SHORTCUT_TWINS {
+                    out.entry(twin).or_insert(&b.keys);
+                }
+            } else {
+                out.entry(&b.command).or_insert(&b.keys);
+            }
+        }
+        out
+    }
+
     /// The command a chord runs with `panel` focused (panel shortcuts first).
     pub fn resolve(&self, chord: &Chord, panel: Option<&str>, p: Platform) -> Option<&Binding> {
         let eff = chord.effective(p);
@@ -1030,8 +1048,11 @@ fn panel_opt(p: &str) -> Option<&str> {
 }
 
 /// `file.close` is File ▸ Close: the same action as `sequence.close` (Close Sequence).
+/// Commands that share one shortcut: editing either's key edits both.
+const SHORTCUT_TWINS: [&str; 2] = ["file.close", "sequence.close"];
+
 fn shortcut_twins(id: &str) -> bool {
-    id == "file.close" || id == "sequence.close"
+    SHORTCUT_TWINS.contains(&id)
 }
 
 fn same_shortcut_command(bound: &str, target: &str) -> bool {
