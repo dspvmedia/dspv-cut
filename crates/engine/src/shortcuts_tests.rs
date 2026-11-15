@@ -427,3 +427,23 @@ fn presets_named_active_get_their_own_files() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn primaries_agree_with_primary_for_every_command_and_preset() {
+    use crate::shortcuts::BUILTIN_PRESETS;
+    let mut sc = Shortcuts::new();
+    let mut ids: Vec<String> = crate::command_specs().iter().map(|c| c.id.to_string()).collect();
+    ids.extend(sc.bindings.iter().map(|b| b.command.clone()));
+    ids.push("no.such.command".into());
+    for preset in BUILTIN_PRESETS {
+        sc.bindings = sc.builtin(preset).unwrap();
+        // a panel binding listed first must not become the menu's shortcut
+        sc.bindings.insert(0, Binding { command: "edit.undo".into(), keys: "Cmd+Shift+F12".into(), panel: Some("Timeline".into()) });
+        // twins: Close and Close Sequence share one key, whichever command it is bound under
+        sc.bindings.push(Binding { command: "sequence.close".into(), keys: "Cmd+Alt+F11".into(), panel: None });
+        let all = sc.primaries();
+        for id in &ids {
+            assert_eq!(all.get(id.as_str()).map(|k| k.to_string()), sc.primary(id), "{preset}: {id}");
+        }
+    }
+}

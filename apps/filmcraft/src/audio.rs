@@ -5,11 +5,18 @@
 //! cpal reports as `poll() returned POLLERR`; an unplugged device) is restarted by
 //! [`AudioOut::recover`], keeping the played-frame clock and the play-ahead mixer, so sound
 //! resumes where it stopped instead of playback going silent (#840).
+//!
+//! Each stream lives on a thread of its own ([`StreamThread`]), never on the UI thread: creating and
+//! tearing one down are synchronous calls into the OS audio service, and on macOS disposing a
+//! stream on some output devices (virtual devices such as screen recorders' loopback drivers)
+//! blocks for about 30 s in coreaudiod. Done on the UI thread, stopping playback froze the app
+//! with the spinning cursor for that long.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex, PoisonError, TryLockError};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -20,7 +27,7 @@ use filmcraft_ui_egui::{AudioDevices, AudioOut};
 type Fill = Box<dyn FnMut(&mut [f32], usize) + Send>;
 
 pub struct CpalOut {
-    stream: Option<cpal::Stream>,
+    stream: Option<StreamThread>,
     /// The running playback's mixer, shared with the stream so a restarted stream continues it.
     fill: Option<Arc<Mutex<Fill>>>,
     played: Arc<AtomicU64>,
@@ -189,35 +196,6 @@ impl CpalOut {
         stream_config(&self.hw, self.document_rate, dev)
     }
 
-    fn converted_stream<T>(&self, dev: &cpal::Device, config: &cpal::StreamConfig, fill: Arc<Mutex<Fill>>) -> Result<cpal::Stream, cpal::BuildStreamError>
-    where
-        T: cpal::SizedSample + cpal::FromSample<f32>,
-    {
-        let channels = usize::from(config.channels);
-        let played = self.played.clone();
-        let health = self.health.clone();
-        let error_health = health.clone();
-        let mut scratch = Vec::new();
-        dev.build_output_stream(
-            config,
-            move |buf: &mut [T], _| {
-                // Reuse the conversion buffer. A pathological driver buffer must not panic the audio thread.
-                if buf.len() > 1_048_576 || scratch.try_reserve(buf.len().saturating_sub(scratch.len())).is_err() {
-                    buf.fill(T::EQUILIBRIUM);
-                    if !health.failed.swap(true, Ordering::SeqCst) {
-                        eprintln!("filmcraft: unable to allocate the audio conversion buffer");
-                    }
-                    return;
-                }
-                scratch.resize(buf.len(), 0.0);
-                render(&fill, &mut scratch, channels, &played, &health);
-                convert_samples(&scratch, buf);
-            },
-            move |e| stream_error(&error_health, e),
-            None,
-        )
-    }
-
     /// Open the configured output device and play `fill` on it. `expect` is the (sample rate,
     /// channels) a restarted stream must keep: the mixer was set up for them.
     fn open(&mut self, fill: Arc<Mutex<Fill>>, expect: Option<(u32, u16)>) -> Result<(), String> {
@@ -242,33 +220,8 @@ impl CpalOut {
         }
         self.rate = cfg.sample_rate().0;
         self.channels = cfg.channels();
-        let stream = match cfg.sample_format() {
-            cpal::SampleFormat::F32 => {
-                let played = self.played.clone();
-                let health = self.health.clone();
-                let error_health = health.clone();
-                dev.build_output_stream(
-                    &config,
-                    move |buf: &mut [f32], _| render(&fill, buf, channels, &played, &health),
-                    move |e| stream_error(&error_health, e),
-                    None,
-                )
-            }
-            cpal::SampleFormat::I8 => self.converted_stream::<i8>(&dev, &config, fill),
-            cpal::SampleFormat::I16 => self.converted_stream::<i16>(&dev, &config, fill),
-            cpal::SampleFormat::I24 => self.converted_stream::<cpal::I24>(&dev, &config, fill),
-            cpal::SampleFormat::I32 => self.converted_stream::<i32>(&dev, &config, fill),
-            cpal::SampleFormat::I64 => self.converted_stream::<i64>(&dev, &config, fill),
-            cpal::SampleFormat::U8 => self.converted_stream::<u8>(&dev, &config, fill),
-            cpal::SampleFormat::U16 => self.converted_stream::<u16>(&dev, &config, fill),
-            cpal::SampleFormat::U32 => self.converted_stream::<u32>(&dev, &config, fill),
-            cpal::SampleFormat::U64 => self.converted_stream::<u64>(&dev, &config, fill),
-            cpal::SampleFormat::F64 => self.converted_stream::<f64>(&dev, &config, fill),
-            other => return Err(format!("unsupported sample format {other:?}")),
-        }
-        .map_err(|e| e.to_string())?;
-        stream.play().map_err(|e| e.to_string())?;
-        self.stream = Some(stream);
+        let parts = StreamParts { fill, played: self.played.clone(), health: self.health.clone(), channels };
+        self.stream = Some(StreamThread::spawn(dev, config, cfg.sample_format(), parts)?);
         Ok(())
     }
 
@@ -281,6 +234,156 @@ impl CpalOut {
         self.health.clear_errors();
         self.open(fill, Some(expect))
     }
+}
+
+/// What a stream's device callback needs: the mixer, the clock and the health flags.
+struct StreamParts {
+    fill: Arc<Mutex<Fill>>,
+    played: Arc<AtomicU64>,
+    health: Arc<Health>,
+    channels: usize,
+}
+
+/// How long [`AudioOut::start`] waits for a new stream to open and start playing. A device that
+/// takes longer is given up on: playback goes on without sound (the UI's own clock) instead of
+/// freezing the UI.
+const OPEN_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// A stream owned by a thread of its own (cpal's `Stream` cannot change threads). The thread
+/// builds and starts the stream, then holds it until this handle is dropped, and tears it down
+/// there: dropping the handle never waits for the OS audio service.
+struct StreamThread {
+    /// Dropped with the handle: the thread's `recv` returns and it drops the stream.
+    _close: mpsc::Sender<()>,
+    /// Cleared with the handle, so a stream that is slow to stop plays silence and stops moving
+    /// the clock at once (only one stream ever runs the mixer).
+    live: Arc<AtomicBool>,
+}
+
+impl Drop for StreamThread {
+    fn drop(&mut self) {
+        self.live.store(false, Ordering::SeqCst);
+    }
+}
+
+impl StreamThread {
+    /// Open a stream on `dev` on a new thread and start it; an error when it fails or does not
+    /// start within [`OPEN_TIMEOUT`].
+    fn spawn(dev: cpal::Device, config: cpal::StreamConfig, format: cpal::SampleFormat, parts: StreamParts) -> Result<Self, String> {
+        Self::spawn_with(OPEN_TIMEOUT, move |live| {
+            let stream = build_stream(&dev, &config, format, parts, live)?;
+            stream.play().map_err(|e| e.to_string())?;
+            Ok(stream)
+        })
+    }
+
+    /// Run `open` on a new thread and keep what it returns there until the handle is dropped.
+    /// `open` gets the flag the handle clears when it is dropped.
+    fn spawn_with<S: 'static>(timeout: Duration, open: impl FnOnce(Arc<AtomicBool>) -> Result<S, String> + Send + 'static) -> Result<Self, String> {
+        let live = Arc::new(AtomicBool::new(true));
+        let (close_tx, close_rx) = mpsc::channel::<()>();
+        let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
+        let thread_live = live.clone();
+        std::thread::Builder::new()
+            .name("filmcraft-audio-out".into())
+            .spawn(move || {
+                // a panic in the backend must not take the app down; `start` sees the thread end
+                let run = catch_unwind(AssertUnwindSafe(|| match open(thread_live) {
+                    Ok(stream) => {
+                        let _ = ready_tx.send(Ok(()));
+                        // until the handle is dropped (or `start` gave up waiting)
+                        let _ = close_rx.recv();
+                        drop(stream);
+                    }
+                    Err(e) => {
+                        let _ = ready_tx.send(Err(e));
+                    }
+                }));
+                if run.is_err() {
+                    log::warn!("the audio output thread panicked; playing without sound");
+                }
+            })
+            .map_err(|e| format!("could not start the audio output thread: {e}"))?;
+        let handle = StreamThread { _close: close_tx, live };
+        match ready_rx.recv_timeout(timeout) {
+            Ok(Ok(())) => Ok(handle),
+            Ok(Err(e)) => Err(e),
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(format!("the audio output device did not start within {} s", timeout.as_secs_f32())),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err("the audio output thread stopped before the stream started".into()),
+        }
+    }
+}
+
+/// Build an output stream in the device's sample format that plays `parts` while `live`.
+fn build_stream(
+    dev: &cpal::Device,
+    config: &cpal::StreamConfig,
+    format: cpal::SampleFormat,
+    parts: StreamParts,
+    live: Arc<AtomicBool>,
+) -> Result<cpal::Stream, String> {
+    match format {
+        cpal::SampleFormat::F32 => {
+            let StreamParts { fill, played, health, channels } = parts;
+            let error_health = health.clone();
+            dev.build_output_stream(
+                config,
+                move |buf: &mut [f32], _| {
+                    if live.load(Ordering::SeqCst) {
+                        render(&fill, buf, channels, &played, &health);
+                    } else {
+                        buf.fill(0.0);
+                    }
+                },
+                move |e| stream_error(&error_health, e),
+                None,
+            )
+            .map_err(|e| e.to_string())
+        }
+        cpal::SampleFormat::I8 => converted_stream::<i8>(dev, config, parts, live),
+        cpal::SampleFormat::I16 => converted_stream::<i16>(dev, config, parts, live),
+        cpal::SampleFormat::I24 => converted_stream::<cpal::I24>(dev, config, parts, live),
+        cpal::SampleFormat::I32 => converted_stream::<i32>(dev, config, parts, live),
+        cpal::SampleFormat::I64 => converted_stream::<i64>(dev, config, parts, live),
+        cpal::SampleFormat::U8 => converted_stream::<u8>(dev, config, parts, live),
+        cpal::SampleFormat::U16 => converted_stream::<u16>(dev, config, parts, live),
+        cpal::SampleFormat::U32 => converted_stream::<u32>(dev, config, parts, live),
+        cpal::SampleFormat::U64 => converted_stream::<u64>(dev, config, parts, live),
+        cpal::SampleFormat::F64 => converted_stream::<f64>(dev, config, parts, live),
+        other => Err(format!("unsupported sample format {other:?}")),
+    }
+}
+
+fn converted_stream<T>(dev: &cpal::Device, config: &cpal::StreamConfig, parts: StreamParts, live: Arc<AtomicBool>) -> Result<cpal::Stream, String>
+where
+    T: cpal::SizedSample + cpal::FromSample<f32>,
+{
+    let StreamParts { fill, played, health, channels } = parts;
+    let error_health = health.clone();
+    let mut scratch = Vec::new();
+    dev.build_output_stream(
+        config,
+        move |buf: &mut [T], _| {
+            if !live.load(Ordering::SeqCst) {
+                buf.fill(T::EQUILIBRIUM);
+                return;
+            }
+            // Reuse the conversion buffer. A pathological driver buffer must not panic the audio thread.
+            if buf.len() > 1_048_576 || scratch.try_reserve(buf.len().saturating_sub(scratch.len())).is_err() {
+                buf.fill(T::EQUILIBRIUM);
+                if !health.failed.swap(true, Ordering::SeqCst) {
+                    eprintln!("filmcraft: unable to allocate the audio conversion buffer");
+                }
+                return;
+            }
+            scratch.resize(buf.len(), 0.0);
+            render(&fill, &mut scratch, channels, &played, &health);
+            convert_samples(&scratch, buf);
+        },
+        move |e| stream_error(&error_health, e),
+        None,
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// What the audio thread reports to the UI thread.
@@ -411,6 +514,7 @@ impl AudioOut for CpalOut {
         Ok(self.rate)
     }
     fn stop(&mut self) {
+        // only signals the stream's thread: tearing the stream down can block for seconds
         self.stream = None;
         self.fill = None;
     }
@@ -525,6 +629,59 @@ mod tests {
         assert!(!health.failed.load(Ordering::SeqCst), "a stream error alone must not silence playback");
         let output = CpalOut::new();
         assert_eq!(output.played_frames(), None, "no stream, no clock");
+    }
+
+    /// A stream whose teardown blocks, as disposing one on some macOS output devices does for ~30 s.
+    struct SlowToDrop(Arc<AtomicBool>);
+    impl Drop for SlowToDrop {
+        fn drop(&mut self) {
+            std::thread::sleep(Duration::from_millis(1_500));
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn stopping_does_not_wait_for_the_stream_teardown() {
+        let dropped = Arc::new(AtomicBool::new(false));
+        let d = dropped.clone();
+        let handle = StreamThread::spawn_with(Duration::from_secs(5), move |_| Ok(SlowToDrop(d))).unwrap();
+        let t = Instant::now();
+        drop(handle);
+        assert!(t.elapsed() < Duration::from_millis(500), "dropping the handle took {:?}", t.elapsed());
+        assert!(!dropped.load(Ordering::SeqCst), "torn down on the stream's own thread, later");
+        let t = Instant::now();
+        while !dropped.load(Ordering::SeqCst) && t.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(dropped.load(Ordering::SeqCst), "the stream is still torn down");
+    }
+
+    #[test]
+    fn a_dropped_handle_silences_its_stream_at_once() {
+        let (tx, rx) = mpsc::channel();
+        let handle = StreamThread::spawn_with(Duration::from_secs(5), move |live| {
+            let _ = tx.send(live);
+            Ok(())
+        })
+        .unwrap();
+        let live = rx.recv().unwrap();
+        assert!(live.load(Ordering::SeqCst));
+        drop(handle);
+        assert!(!live.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn a_device_that_does_not_open_in_time_or_fails_is_an_error_not_a_freeze() {
+        let t = Instant::now();
+        let slow = StreamThread::spawn_with(Duration::from_millis(200), |_| {
+            std::thread::sleep(Duration::from_secs(2));
+            Ok(())
+        });
+        assert!(slow.is_err());
+        assert!(t.elapsed() < Duration::from_secs(1), "start waited {:?}", t.elapsed());
+        assert_eq!(StreamThread::spawn_with(Duration::from_secs(5), |_| Err::<(), _>("no device".to_string())).err().as_deref(), Some("no device"));
+        let panicked = StreamThread::spawn_with(Duration::from_secs(5), |_| -> Result<(), String> { panic!("backend bug") });
+        assert!(panicked.is_err());
     }
 
     fn ms(n: u64) -> Duration {
