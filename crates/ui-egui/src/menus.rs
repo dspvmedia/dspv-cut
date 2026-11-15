@@ -952,6 +952,9 @@ pub fn menu_items(app: &FilmcraftApp) -> Vec<MenuItem> {
             "app.language.polish" => it.checked = Some(app.ui.language == crate::i18n::Language::Pl),
             "app.language.swedish" => it.checked = Some(app.ui.language == crate::i18n::Language::Sv),
             "app.language.turkish" => it.checked = Some(app.ui.language == crate::i18n::Language::Tr),
+            "window.floatProgramMonitor" => {
+                it.checked = Some(app.ui.dock.floating.iter().any(|w| w.contains(&crate::dock::PanelKind::Program)));
+            }
             _ => {}
         }
         if let Some(on) = engine_toggle(&app.session, &it.id) {
