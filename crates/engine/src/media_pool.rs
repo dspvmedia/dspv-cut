@@ -7,6 +7,9 @@
 //!   slate ([`filmcraft_render::offline`]) instead of failing; the reason is kept for the UI. So
 //!   do the frames of a file that opens but whose picture FilmCraft cannot decode (a codec or
 //!   profile without a decoder).
+//! - A clip with an Interpret Footage rotation ([`MediaClip::rotation`]) is opened through
+//!   [`RotatedSource`]: every reader (monitors, thumbnails, sequences, exports, background jobs)
+//!   gets the picture upright, from the full-resolution file and from its proxy alike.
 //! - With proxies enabled ([`MediaPool::set_use_proxies`]) items with an attached proxy are read
 //!   from it. Proxy frames are smaller; the source still reports the full-resolution size, and the
 //!   compositor derives its pixel scale from the frame it gets, so effects and Motion render the
@@ -89,6 +92,8 @@ pub const PROBE_WHOLE_FILE_MAX: u64 = 64 * 1024 * 1024;
 pub fn media_key(m: &MediaClip) -> String {
     match &m.media {
         MediaRef::File { path } if m.offline => format!("offline:{path}"),
+        // a turned clip is another picture: its source is opened again when the rotation changes
+        MediaRef::File { path } if m.rotation() != 0 => format!("file:{path}#turn{}", m.rotation()),
         MediaRef::File { path } => format!("file:{path}"),
         MediaRef::Generator(g) => format!("generator:{g:?}"),
     }
@@ -346,7 +351,7 @@ impl MediaPool {
             }) {
                 Ok(s) => {
                     self.offline.write().unwrap_or_else(PoisonError::into_inner).remove(&item);
-                    self.unsupported_as_slate(item, path, s)
+                    self.unsupported_as_slate(item, path, RotatedSource::wrap(s, m.rotation()))
                 }
                 Err(_) if filmcraft_media::pending::is_set() => {
                     // the host is still fetching the file's bytes: show the slate for now, retry later
@@ -380,7 +385,7 @@ impl MediaPool {
         let reader = services.reader(&file)?.ok()?;
         let openers = self.openers.read().unwrap_or_else(PoisonError::into_inner).clone();
         let src = filmcraft_media::reader::open_reader_within(&file_name(&file), reader, &filmcraft_codecs::reader_openers(), &openers, 0).ok()?;
-        Some(self.unsupported_as_slate(item, path, src))
+        Some(self.unsupported_as_slate(item, path, RotatedSource::wrap(src, m.rotation())))
     }
 
     fn set_offline(&self, item: ItemId, reason: OfflineReason, path: &str, error: &str) {
@@ -388,7 +393,9 @@ impl MediaPool {
     }
 
     fn proxy_source(&self, item: ItemId, path: &str, m: &MediaClip, services: &dyn Services) -> Option<SharedSource> {
-        let key = format!("proxy:{path}");
+        // the proxy turns with its clip (Interpret Footage ▸ Rotation): the two are the same picture
+        let turns = m.rotation();
+        let key = if turns == 0 { format!("proxy:{path}") } else { format!("proxy:{path}#turn{turns}") };
         if let Some((k, s)) = self.proxies.read().unwrap_or_else(PoisonError::into_inner).get(&item)
             && *k == key
         {
@@ -408,7 +415,7 @@ impl MediaPool {
                 } else {
                     None
                 };
-                let src: SharedSource = Arc::new(ProxySource { proxy: s, info: m.info.clone(), audio_from });
+                let src: SharedSource = Arc::new(ProxySource { proxy: RotatedSource::wrap(s, turns), info: m.info.clone(), audio_from });
                 self.proxies.write().unwrap_or_else(PoisonError::into_inner).insert(item, (key, src.clone()));
                 Some(src)
             }
@@ -632,6 +639,55 @@ impl MediaSource for DamagedAsSlate {
             }
             r => r,
         }
+    }
+    fn audio(&self, start: i64, frames: usize, sample_rate: u32) -> filmcraft_media::Result<AudioBuffer> {
+        self.inner.audio(start, frames, sample_rate)
+    }
+    fn audio_stream(&self, stream: usize, start: i64, frames: usize, sample_rate: u32) -> filmcraft_media::Result<AudioBuffer> {
+        self.inner.audio_stream(stream, start, frames, sample_rate)
+    }
+}
+
+/// A source whose picture is turned clockwise by quarter turns (Interpret Footage ▸ Rotation):
+/// footage a camera stored on its side without a display rotation in the file. Reports the turned
+/// size and hands out turned frames ([`VideoFrame::rotated`], the same turn a container's display
+/// rotation gets in the decoders); sound passes through.
+pub struct RotatedSource {
+    inner: SharedSource,
+    turns: u8,
+    info: MediaInfo,
+    /// The last frame handed out and the frame it was turned from: a paused monitor, its scopes
+    /// and its thumbnails ask for the same frame again and again.
+    last: Mutex<Option<(Arc<VideoFrame>, Arc<VideoFrame>)>>,
+}
+
+impl RotatedSource {
+    /// `src` turned by `quarter_turns` (`src` itself for no turn).
+    pub fn wrap(src: SharedSource, quarter_turns: u8) -> SharedSource {
+        let turns = quarter_turns % 4;
+        if turns == 0 {
+            return src;
+        }
+        let mut info = src.info().clone();
+        filmcraft_project::turn_info(&mut info, turns);
+        Arc::new(RotatedSource { inner: src, turns, info, last: Mutex::new(None) })
+    }
+}
+
+impl MediaSource for RotatedSource {
+    fn info(&self) -> &MediaInfo {
+        &self.info
+    }
+    fn video_frame(&self, req: FrameRequest) -> filmcraft_media::Result<Arc<VideoFrame>> {
+        let f = self.inner.video_frame(req)?;
+        if let Some((from, turned)) = self.last.lock().unwrap_or_else(PoisonError::into_inner).as_ref()
+            && Arc::ptr_eq(from, &f)
+        {
+            return Ok(turned.clone());
+        }
+        let turned = Arc::new(f.rotated(self.turns));
+        *self.last.lock().unwrap_or_else(PoisonError::into_inner) = Some((f, turned.clone()));
+        Ok(turned)
     }
     fn audio(&self, start: i64, frames: usize, sample_rate: u32) -> filmcraft_media::Result<AudioBuffer> {
         self.inner.audio(start, frames, sample_rate)

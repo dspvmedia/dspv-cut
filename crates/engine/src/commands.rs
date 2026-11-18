@@ -968,10 +968,9 @@ fn import_source(
     let path_s = path.to_string();
     s.media.allow(path);
     // Import rules (`import.setRules`): the colour space this file is interpreted with, set in the import's own undo step
-    let interpret = filmcraft_project::Interpretation {
-        color_space: crate::interpret_rules::resolve(&s.prefs.import_rules.rules, path, &*s.services),
-        ..Default::default()
-    };
+    // ... and the rotation, for footage a camera stored on its side (the proxy below is checked against the picture as stored)
+    let rule = crate::interpret_rules::resolve_outcome(&s.prefs.import_rules.rules, path, &*s.services).unwrap_or_default();
+    let interpret = filmcraft_project::Interpretation { color_space: rule.color_space, ..Default::default() };
     // ... and the proxy the rules name for it: found by name, checked against this clip, attached with the import (a pair that does not
     // fit is reported and left out, never attached)
     let mut proxy: Option<MediaRef> = None;
@@ -981,24 +980,19 @@ fn import_source(
             Err(why) => s.import_notes.push(json!({"warning": format!("{name}: the proxy {found} was not attached: {why}")})),
         }
     }
-    let id = s.edit(&format!("Import {name}"), |p, _| {
-        Ok(p.add_item(
-            &name,
-            label,
-            ItemKind::Media(Box::new(MediaClip {
-                media: MediaRef::File { path: path_s },
-                info,
-                interpret,
-                mark_in: None,
-                mark_out: None,
-                markers: vec![],
-                offline: false,
-                proxy: proxy.clone(),
-                identity: Some(identity),
-            })),
-            bin,
-        ))
-    })?;
+    let mut clip = MediaClip {
+        media: MediaRef::File { path: path_s },
+        info,
+        interpret,
+        mark_in: None,
+        mark_out: None,
+        markers: vec![],
+        offline: false,
+        proxy: proxy.clone(),
+        identity: Some(identity),
+    };
+    clip.set_rotation(rule.rotation);
+    let id = s.edit(&format!("Import {name}"), |p, _| Ok(p.add_item(&name, label, ItemKind::Media(Box::new(clip)), bin)))?;
     if let Some(MediaRef::File { path: pp }) = &proxy {
         s.import_notes.push(json!({"item": id.0, "proxy": pp}));
     }

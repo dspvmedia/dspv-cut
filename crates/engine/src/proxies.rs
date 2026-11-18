@@ -116,6 +116,19 @@ fn transcode_with_file(
     progress: &Progress,
 ) -> std::result::Result<Report, String> {
     let Dest { path: out, file: output_file } = dest;
+    // The file made here stands in for the clip's file (a proxy) or replaces it, so it is stored the way that file is: a clip
+    // turned with Interpret Footage ▸ Rotation is written as stored, not upright, and the clip's rotation keeps applying to
+    // it. `src` comes from the media pool and is already upright, so it is turned back first.
+    let turns = clip.rotation();
+    let unturned;
+    let (clip, src) = if turns == 0 {
+        (clip, src)
+    } else {
+        let mut c = clip.clone();
+        c.set_rotation(0);
+        unturned = c;
+        (&unturned, crate::media_pool::RotatedSource::wrap(src, 4 - turns))
+    };
     let info = &clip.info;
     let rate = clip.frame_rate();
     let mut st = SequenceSettings::default();
@@ -417,7 +430,7 @@ pub(crate) fn proxy_problem(
 fn check_proxy(s: &Session, item: ItemId, path: &str) -> Result<()> {
     let (clip, _, name) = media_path(&s.project, item).ok_or_else(|| bad("media.attachProxies", format!("item {} is not file media", item.0)))?;
     let src = s.media.open_file(path, &*s.services).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    match proxy_problem(&clip.info, src.info(), &name, path, false) {
+    match proxy_problem(&clip.file_info(), src.info(), &name, path, false) {
         Some(why) => Err(EngineError::Other(why)),
         None => Ok(()),
     }

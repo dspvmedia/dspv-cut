@@ -158,7 +158,7 @@ impl Session {
         let mut refreshed: Vec<ItemId> = Vec::new();
         for (id, path, info, identity, src) in fresh {
             if let Some(m) = p.item_mut(id).and_then(|i| i.as_media_mut()) {
-                m.info = info;
+                m.set_file_info(info);
                 if identity.is_some() {
                     m.identity = identity;
                 }

@@ -30,7 +30,7 @@ pub fn open_interpret(app: &mut FilmcraftApp, params: &Value) {
         .and_then(|i| app.session.execute("media.colorInfo", json!({"item": i})).ok())
         .and_then(|v| v["override"].as_str().map(str::to_string))
         .unwrap_or_else(|| "auto".into());
-    app.ui.color_dialog = Some(ColorDialog::Interpret { items, color_space: current });
+    app.ui.color_dialog = Some(ColorDialog::Interpret { items, color_space: current, rotation: None });
 }
 
 pub fn open_sequence(app: &mut FilmcraftApp) {
@@ -63,12 +63,12 @@ pub fn show(app: &mut FilmcraftApp, ctx: &egui::Context) {
     let mut apply: Option<(&'static str, Value)> = None;
     let mut close = false;
     match &mut d {
-        ColorDialog::Interpret { items, color_space } => {
-            let detected = items
-                .first()
-                .and_then(|i| app.session.execute("media.colorInfo", json!({"item": i})).ok())
-                .and_then(|v| v["detectedLabel"].as_str().map(str::to_string))
-                .unwrap_or_else(|| "—".into());
+        ColorDialog::Interpret { items, color_space, rotation } => {
+            let info = items.first().and_then(|i| app.session.execute("media.colorInfo", json!({"item": i})).ok()).unwrap_or(Value::Null);
+            let detected = info["detectedLabel"].as_str().map_or_else(|| "—".into(), str::to_string);
+            // the rotation the first item has now, shown until another is picked; generated clips have none to set
+            let turned = rotation.unwrap_or_else(|| info["rotation"].as_u64().and_then(|d| u32::try_from(d).ok()).unwrap_or(0));
+            let rotatable = info["rotatable"].as_bool().unwrap_or(false);
             let n = items.len();
             egui::Window::new(tl!("Interpret Footage"))
                 .id(egui::Id::unique("Interpret Footage"))
@@ -93,9 +93,26 @@ pub fn show(app: &mut FilmcraftApp, ctx: &egui::Context) {
                             }
                         }
                     });
+                    if rotatable {
+                        ui.add_space(6.0);
+                        ui.label(egui::RichText::new(tl!("Rotation")).strong());
+                        ui.label(tl!("For footage stored on its side. The clip and its proxy turn together."));
+                        ui.horizontal(|ui| {
+                            for (deg, label) in [(0u32, tl!("As stored")), (90, tl!("90° clockwise")), (180, tl!("180°")), (270, tl!("90° counter-clockwise"))]
+                            {
+                                if radio(app, ui, &format!("colorDialog.rotation.{deg}"), turned == deg, label) {
+                                    *rotation = Some(deg);
+                                }
+                            }
+                        });
+                    }
                     let (ok, cancel) = buttons(app, ui);
                     if ok {
-                        apply = Some(("clip.interpretFootage", json!({"items": items, "colorSpace": color_space})));
+                        let mut params = json!({"items": items, "colorSpace": color_space});
+                        if let Some(deg) = *rotation {
+                            params["rotation"] = json!(deg);
+                        }
+                        apply = Some(("clip.interpretFootage", params));
                     }
                     close = ok || cancel;
                 });

@@ -1,6 +1,7 @@
 use super::item::{ItemKind, MediaClip, ProjectItem};
 use super::sequence::{conformed_size, sane_par};
-use super::{BTreeMap, ClipId, EffectInstance, ItemId, ParamValue, Project, TimeRange, Vec2, effect};
+use super::{BTreeMap, ClipId, EffectInstance, ItemId, Param, ParamValue, Project, TimeRange, TrackItem, Vec2, effect};
+use filmcraft_geom::Affine;
 
 /// Resolve NaN "auto" point defaults (frame centre / source centre) in an effect instance.
 pub fn resolve_auto_points(e: &mut EffectInstance, frame: (u32, u32), source: (u32, u32)) {
@@ -85,6 +86,46 @@ impl Project {
             }
         }
         None
+    }
+
+    /// After the media item `media` was turned clockwise by `delta` quarter turns (Interpret
+    /// Footage ▸ Rotation; `old_size` is its picture size before the turn): bring its clips in
+    /// sequences along. For every clip of `media` (or of a subclip of it), what is measured in the
+    /// clip's own pixels moves to where that part of the picture now is: the Motion anchor point
+    /// (so the picture turns in place, about its anchor), every effect mask, and the edges of the
+    /// Crop effect. Other effects keep their settings. With `fold`, a clip whose Motion ▸ Rotation is not animated and is exactly the same
+    /// turn was already stood upright by hand in its sequence: that rotation becomes 0 (and, with
+    /// Uniform Scale off, its two scales swap), so the clip looks exactly as it did before instead
+    /// of turning twice. Media with pixels that are not square is never folded. Returns (clips
+    /// folded, clips that turned with the footage).
+    pub fn turn_sequence_clips(&mut self, media: ItemId, old_size: (u32, u32), delta: u8, fold: bool) -> (usize, usize) {
+        let delta = delta % 4;
+        if delta == 0 {
+            return (0, 0);
+        }
+        let fold = fold && self.source_par(media).is_none_or(|p| p == (1, 1));
+        let uses_media = |p: &Project, item: ItemId| p.resolve_media(item).is_some_and(|(id, _, _)| id == media);
+        // which clips: decided on the shared project, before a sequence is detached for the edit
+        let uses: Vec<(ItemId, Vec<ClipId>)> = self
+            .sequences()
+            .filter_map(|i| {
+                let clips: Vec<ClipId> =
+                    i.as_sequence()?.video_tracks.iter().flat_map(|t| &t.items).filter(|ti| uses_media(self, ti.item)).map(|ti| ti.id).collect();
+                (!clips.is_empty()).then_some((i.id, clips))
+            })
+            .collect();
+        let (mut folded, mut turned) = (0, 0);
+        for (seq_id, clips) in uses {
+            let Some(seq) = self.sequence_mut(seq_id) else { continue };
+            for ti in seq.video_tracks.iter_mut().flat_map(|t| &mut t.items).filter(|ti| clips.contains(&ti.id)) {
+                if turn_clip(ti, old_size, delta, fold) {
+                    folded += 1;
+                } else {
+                    turned += 1;
+                }
+            }
+        }
+        (folded, turned)
     }
 
     /// Size in pixels of what an item shows: a media clip's picture, a sequence's frame, an
@@ -186,4 +227,76 @@ impl Project {
 
 fn has_auto_point(e: &EffectInstance) -> bool {
     e.params.values().any(|p| matches!(&p.value, ParamValue::Vec2(v) if v.x.is_nan() || v.y.is_nan()))
+}
+
+/// [`Project::turn_sequence_clips`] for one clip: what is measured in the clip's own pixels
+/// follows the picture (the Motion anchor point, every effect mask, the edges of Crop), and with
+/// `fold` a Motion rotation equal to the turn is moved out. True when it was folded.
+fn turn_clip(ti: &mut TrackItem, old_size: (u32, u32), delta: u8, fold: bool) -> bool {
+    let (w, h) = (f64::from(old_size.0), f64::from(old_size.1));
+    // where a point of the lying picture is in the turned one
+    let to_turned = match delta {
+        1 => Affine { a: 0.0, b: 1.0, c: -1.0, d: 0.0, e: h, f: 0.0 },
+        2 => Affine { a: -1.0, b: 0.0, c: 0.0, d: -1.0, e: w, f: h },
+        _ => Affine { a: 0.0, b: -1.0, c: 1.0, d: 0.0, e: 0.0, f: w },
+    };
+    let mut folded = false;
+    for e in &mut ti.effects {
+        for m in &mut e.masks {
+            m.path.map_values(|v| match v {
+                ParamValue::Path(path) => ParamValue::Path(path.transformed(&to_turned)),
+                other => other,
+            });
+        }
+        match e.effect.as_str() {
+            "motion" => folded = turn_motion(e, &to_turned, delta, fold),
+            "crop" => {
+                // the edge a side of the lying picture has become: clockwise, its left edge is the top one
+                let from: [&str; 4] = match delta {
+                    1 => ["left", "top", "right", "bottom"],
+                    2 => ["bottom", "left", "top", "right"],
+                    _ => ["right", "bottom", "left", "top"],
+                };
+                let old: Vec<Option<Param>> = from.iter().map(|k| e.params.remove(*k)).collect();
+                for (k, p) in ["top", "right", "bottom", "left"].iter().zip(old) {
+                    if let Some(p) = p {
+                        e.params.insert((*k).to_string(), p);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    folded
+}
+
+/// [`turn_clip`] for the Motion effect: true when its rotation was the turn and has been moved
+/// out (folded).
+fn turn_motion(m: &mut EffectInstance, to_turned: &Affine, delta: u8, fold: bool) -> bool {
+    if let Some(a) = m.param_mut("anchor") {
+        // an "auto" (NaN) anchor stays the centre
+        a.map_values(|v| match v {
+            ParamValue::Vec2(p) if !p.x.is_nan() && !p.y.is_nan() => ParamValue::Vec2(to_turned.apply(p)),
+            other => other,
+        });
+    }
+    let is_turn = m.param("rotation").is_some_and(|r| {
+        !r.is_animated() && matches!(r.value, ParamValue::Float(deg) if deg.is_finite() && (deg.rem_euclid(360.0) - f64::from(delta) * 90.0).abs() < 1e-6)
+    });
+    if !(fold && m.enabled && is_turn) {
+        return false;
+    }
+    if let Some(r) = m.param_mut("rotation") {
+        r.value = ParamValue::Float(0.0);
+    }
+    // Scale is applied before Rotation: the height scale of the lying picture is the width scale of the standing one
+    let uniform = m.param("uniform_scale").and_then(|p| p.value.as_bool()).unwrap_or(true);
+    if !uniform
+        && delta % 2 == 1
+        && let (Some(s), Some(sw)) = (m.params.remove("scale"), m.params.remove("scale_width"))
+    {
+        m.params.insert("scale".into(), sw);
+        m.params.insert("scale_width".into(), s);
+    }
+    true
 }

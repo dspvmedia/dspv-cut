@@ -139,7 +139,7 @@ pub fn import(s: &mut Session, path: &str, bytes: &[u8], format: Format, bin: Op
                         && let ItemKind::Media(m) = &mut item.kind
                     {
                         let rate = info.video.as_ref().map(|v| v.frame_rate);
-                        m.info = info.clone();
+                        m.set_file_info(info.clone());
                         m.offline = false;
                         m.identity = identity;
                         if let (Some(tc), Some(rate)) = (rebase, rate) {
