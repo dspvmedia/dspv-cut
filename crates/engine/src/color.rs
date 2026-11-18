@@ -40,7 +40,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "clip.interpretFootage",
             "Interpret Footage…",
             &["Clip", "Modify"],
-            r#"{"items":[id]?,"colorSpace":"auto"|"<color space id>"?,"pixelAspect":[num,den]|"file"?}"#,
+            r#"{"items":[id]?,"colorSpace":"auto"|"<color space id>"?,"pixelAspect":[num,den]|"file"?,"rotation":0|90|180|270?,"foldSequenceRotation":bool=true}"#,
             has_footage,
             interpret,
         ),
@@ -295,9 +295,18 @@ pub(crate) fn footage_targets(s: &Session, p: &Value) -> Vec<ItemId> {
     v
 }
 
-/// `clip.interpretFootage`: the colour space (`colorSpace`) and / or the pixel aspect ratio
-/// (`pixelAspect`) the footage is interpreted with. `"auto"` / `"file"` go back to the file's
-/// metadata; a parameter left out keeps its current interpretation.
+/// `clip.interpretFootage`: the colour space (`colorSpace`), the pixel aspect ratio
+/// (`pixelAspect`) and / or the rotation (`rotation`: 0, 90, 180 or 270 degrees clockwise) the
+/// footage is interpreted with. `"auto"` / `"file"` go back to the file's metadata; a parameter
+/// left out keeps its current interpretation.
+///
+/// `rotation` stands footage upright that a camera stored on its side without saying so in the
+/// file. It turns the picture where the file is read, so the Source monitor, thumbnails,
+/// sequences and exports all see it upright, from the clip and from its proxy. A clip already in
+/// a sequence that was turned by hand with the same Motion rotation keeps its look: that turn is
+/// moved into the clip ([`filmcraft_project::Project::turn_sequence_clips`]) unless
+/// `foldSequenceRotation` is false; any other clip of the footage turns in place with it. A pixel aspect
+/// given in the same call is in the pixels of the turned picture.
 fn interpret(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "clip.interpretFootage";
     let items = footage_targets(s, p);
@@ -317,28 +326,65 @@ fn interpret(s: &mut Session, p: &Value) -> Result<Value> {
                 bad(CMD, format!("pixelAspect must be [num, den] between 1:{0} and {0}:1, or \"file\"", filmcraft_project::MAX_PIXEL_ASPECT))
             })?)),
         };
-    if cs.is_none() && par.is_none() {
-        return Err(bad(CMD, "need `colorSpace` (auto or a colour space id) or `pixelAspect`"));
+    let turns = match p.get("rotation") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(rotation_p(v).ok_or_else(|| bad(CMD, "rotation must be 0, 90, 180 or 270 (degrees clockwise)"))?),
+    };
+    let can_rotate = |i: &ItemId| s.project.item(*i).and_then(|it| it.as_media()).is_some_and(|m| m.can_rotate());
+    if turns.is_some() && !items.iter().any(can_rotate) {
+        return Err(bad(CMD, "rotation is for the picture of footage from files: a generated clip is drawn at the size it was made for"));
     }
+    if cs.is_none() && par.is_none() && turns.is_none() {
+        return Err(bad(CMD, "need `colorSpace` (auto or a colour space id), `pixelAspect` or `rotation`"));
+    }
+    let fold = p.get("foldSequenceRotation").and_then(Value::as_bool).unwrap_or(true);
+    let (mut folded, mut turned) = (0usize, 0usize);
     s.edit("Interpret Footage", |pr, _| {
         for i in &items {
+            let mut turn: Option<((u32, u32), u8)> = None;
             if let Some(ItemKind::Media(m)) = pr.item_mut(*i).map(|it| &mut it.kind) {
                 if let Some(cs) = cs {
                     m.interpret.color_space = cs;
+                }
+                if let Some(turns) = turns {
+                    let old = m.info.video.as_ref().map(|v| (v.width, v.height));
+                    let delta = m.set_rotation(turns);
+                    turn = old.filter(|_| delta != 0).map(|size| (size, delta));
                 }
                 if let Some(par) = par {
                     m.interpret.par = par;
                 }
             }
+            if let Some((old_size, delta)) = turn {
+                let (f, t) = pr.turn_sequence_clips(*i, old_size, delta, fold);
+                (folded, turned) = (folded + f, turned + t);
+            }
         }
         Ok(())
     })?;
     let first = items.first().and_then(|i| s.project.item(*i)).and_then(|i| i.as_media());
-    Ok(json!({
+    let mut out = json!({
         "items": items.iter().map(|i| i.0).collect::<Vec<_>>(),
         "colorSpace": first.and_then(|m| m.interpret.color_space).map(|c| c.id()).unwrap_or("auto"),
         "pixelAspect": first.map(|m| m.pixel_aspect()),
-    }))
+        "rotation": first.map_or(0, |m| u32::from(m.rotation()) * 90),
+    });
+    if turns.is_some() {
+        out["sequenceClipsFolded"] = json!(folded);
+        out["sequenceClipsTurned"] = json!(turned);
+    }
+    Ok(out)
+}
+
+/// 0, 90, 180 or 270 degrees clockwise as quarter turns.
+pub(crate) fn rotation_p(v: &Value) -> Option<u8> {
+    match v.as_u64()? {
+        0 => Some(0),
+        90 => Some(1),
+        180 => Some(2),
+        270 => Some(3),
+        _ => None,
+    }
 }
 
 /// `[num, den]` as a pixel aspect ratio FilmCraft can use ([`filmcraft_project::checked_par`]).
@@ -369,6 +415,9 @@ fn color_info(s: &mut Session, p: &Value) -> Result<Value> {
         // which `metadata` values no tag in the file gave (FilmCraft's defaults); null when unknown
         "assumed": m.info.video.as_ref().and_then(|v| v.color_assumed),
         "override": m.interpret.color_space.map(|c| c.id()),
+        // Interpret Footage ▸ Rotation: degrees clockwise the stored picture is turned by; only files can be turned
+        "rotation": u32::from(m.rotation()) * 90,
+        "rotatable": m.can_rotate(),
         "effective": effective.map(|c| c.id()),
         "effectiveLabel": effective.map(|c| c.label()),
         "hdr": effective.is_some_and(|c| c.is_hdr()),

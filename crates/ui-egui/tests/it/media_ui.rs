@@ -601,3 +601,48 @@ fn unreadable_badge_says_why_on_hover() {
     }
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// Interpret Footage ▸ Rotation: the dialog offers the four turns for footage from a file, the
+/// one picked is applied with OK (the clip reports the standing size), a dialog closed without
+/// touching the rotation leaves it alone, and a generated clip is not offered a rotation.
+#[test]
+fn interpret_footage_dialog_turns_footage_stored_on_its_side() {
+    let root = std::env::temp_dir().join(format!("filmcraft-ui-rotation-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let file = root.join("Lying.mov");
+    make_movie(&file, DemoScene::OceanSunset, 96, 56, 4);
+    let mut s = Session::default();
+    s.execute("file.openDemoProject", json!({})).unwrap();
+    let generated = s.project.items.values().find(|i| i.as_media().is_some()).unwrap().id.0;
+    let item = s.execute("file.import", json!({"paths": [file.to_string_lossy()]})).unwrap()["items"][0].as_u64().unwrap();
+    let mut d = Driver::new(s);
+    let size = |d: &mut Driver| -> Value {
+        let s = &d.harness.state().session;
+        let v = s.project.item(filmcraft_engine::project::ItemId(item)).and_then(|i| i.as_media()).and_then(|m| m.info.video.clone()).unwrap();
+        json!([v.width, v.height])
+    };
+    assert_eq!(size(&mut d), json!([96, 56]));
+    // Clip ▸ Modify ▸ Interpret Footage… on the clip selected in the Project panel
+    d.exec("project.select", json!({"items": [item]}));
+    d.ok("ui.menu.invoke", json!({"id": "clip.interpretFootage"}));
+    d.frames(3);
+    let radios = d.ids("colorDialog.rotation.");
+    assert_eq!(radios.len(), 4, "{radios:?}");
+    d.click("colorDialog.rotation.270");
+    d.click("colorDialog.ok");
+    assert_eq!(d.exec("media.colorInfo", json!({"item": item}))["rotation"], json!(270));
+    assert_eq!(size(&mut d), json!([56, 96]), "the clip stands");
+    // opened again and closed with OK without picking a rotation: it stays
+    d.ok("ui.menu.invoke", json!({"id": "clip.interpretFootage"}));
+    d.frames(3);
+    d.click("colorDialog.ok");
+    assert_eq!(d.exec("media.colorInfo", json!({"item": item}))["rotation"], json!(270));
+    // a generated clip has no stored picture to turn: no rotation is offered
+    d.exec("project.select", json!({"items": [generated]}));
+    d.ok("ui.menu.invoke", json!({"id": "clip.interpretFootage"}));
+    d.frames(3);
+    assert!(d.ids("colorDialog.rotation.").is_empty());
+    d.click("colorDialog.cancel");
+    let _ = std::fs::remove_dir_all(&root);
+}

@@ -1475,6 +1475,8 @@ mod work_area_tests;
 
 #[cfg(test)]
 mod source_placement_tests;
+#[cfg(test)]
+mod source_rotation_tests;
 
 #[cfg(test)]
 mod frame_export_tests;

@@ -19,6 +19,11 @@
 //! folders). On import it is found, checked against the clip (frame rate, length, start timecode, aspect ratio) and attached with
 //! the import; with "Enable proxies" on the editor then plays the proxy, and export always reads the full-resolution clip.
 //!
+//! A rule can also turn the picture (`rotation`: 90, 180 or 270 degrees clockwise), for a camera that stores footage on its
+//! side without a display rotation in the file. It is set at import exactly as `clip.interpretFootage {rotation}` would set
+//! it, on the clip and so on its proxy. Clips already in a project are turned only when `project.applyInterpretRules` is
+//! asked to (`rotation: true`): they may already have been stood upright by hand in their sequences.
+//!
 //! Commands: `import.rules` (read), `import.setRules` (replace, from `rules` or a JSON `path`),
 //! `project.applyInterpretRules` (apply to clips already in the project, one undo step).
 
@@ -90,8 +95,27 @@ pub struct InterpretRule {
     pub tag: Option<FileTag>,
     /// Attach the proxy found here to a clip this rule matches.
     pub proxy: Option<ProxyLink>,
-    /// A colour space id (`color.spaces`), e.g. `nlog-bt2020`.
+    /// A colour space id (`color.spaces`), e.g. `nlog-bt2020`. May be empty in a rule that only turns the picture.
     pub color_space: String,
+    /// Degrees clockwise the stored picture is turned by to stand upright: 0 (as stored), 90, 180 or 270.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub rotation: u32,
+}
+
+fn is_zero(v: &u32) -> bool {
+    *v == 0
+}
+
+/// What the first matching rule says about a file: its colour space and the quarter turns clockwise its picture is turned by.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RuleOutcome {
+    pub color_space: Option<ColorSpace>,
+    pub rotation: u8,
+}
+
+/// A rule's `rotation` in quarter turns (`None`: not 0, 90, 180 or 270).
+fn quarter_turns(degrees: u32) -> Option<u8> {
+    matches!(degrees, 0 | 90 | 180 | 270).then_some((degrees / 90) as u8)
 }
 
 /// Preferences ▸ import rules. Outside the Settings dialog; edited with `import.setRules`.
@@ -248,6 +272,21 @@ pub fn color_space_for_file(rules: &[InterpretRule], path: &str, list: &dyn Fn(&
     })
 }
 
+/// What the first matching rule gives the file at `path`: its colour space and its rotation ([`color_space_for_file`] for both).
+/// A rule that says nothing usable (an unknown colour space and no rotation, or a rotation that is not a quarter turn) is
+/// skipped, never an error.
+pub fn outcome_for_file(rules: &[InterpretRule], path: &str, list: &dyn Fn(&str) -> Option<Vec<String>>, read: ReadAt<'_>) -> Option<RuleOutcome> {
+    let (media_dir, file) = split_path(path);
+    let (stem, ext) = split_name(file);
+    if stem.is_empty() {
+        return None;
+    }
+    rules.iter().take(MAX_RULES).find_map(|rule| {
+        let out = RuleOutcome { color_space: ColorSpace::parse(&rule.color_space), rotation: quarter_turns(rule.rotation)? };
+        (out != RuleOutcome::default() && rule_matches(rule, ext, stem, media_dir, list, read)).then_some(out)
+    })
+}
+
 /// `a/b/../c` as `a/c`, for a path written with `/` only (anything with another separator is left alone).
 fn tidy_path(p: &str) -> String {
     if p.contains('\\') {
@@ -309,6 +348,16 @@ pub fn resolve(rules: &[InterpretRule], path: &str, services: &dyn Services) -> 
     })
 }
 
+/// [`outcome_for_file`] with the host's directory listing and file reads.
+pub fn resolve_outcome(rules: &[InterpretRule], path: &str, services: &dyn Services) -> Option<RuleOutcome> {
+    if rules.is_empty() {
+        return None;
+    }
+    outcome_for_file(rules, path, &|dir| services.list_dir(dir.trim_end_matches(['/', '\\'])).and_then(|r| r.ok()), &|off, len| {
+        services.read_range(path, off, len).ok()
+    })
+}
+
 /// [`proxy_for_file`] with the host's directory listing and file reads.
 pub fn find_proxy(rules: &[InterpretRule], path: &str, services: &dyn Services) -> Option<String> {
     if rules.is_empty() {
@@ -330,7 +379,12 @@ pub fn validate(mut rules: Vec<InterpretRule>) -> std::result::Result<Vec<Interp
         if r.name.chars().count() > 80 {
             return Err(at("name is longer than 80 characters"));
         }
-        if ColorSpace::parse(&r.color_space).is_none() {
+        if quarter_turns(r.rotation).is_none() {
+            return Err(at(&format!("rotation is {}: it must be 0, 90, 180 or 270 (degrees clockwise)", r.rotation)));
+        }
+        r.color_space = r.color_space.trim().to_string();
+        // a rule that turns the picture need not name a colour space
+        if ColorSpace::parse(&r.color_space).is_none() && !(r.color_space.is_empty() && r.rotation != 0) {
             return Err(at(&format!("unknown colour space `{}`", r.color_space)));
         }
         r.extensions = r.extensions.iter().map(|e| e.trim().trim_start_matches('.').to_ascii_lowercase()).filter(|e| !e.is_empty()).collect();
@@ -381,7 +435,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             label: "Apply Import Rules",
             menu: &[],
             shortcut: None,
-            params: r#"{"items":[id]?,"overwrite":bool=false}"#,
+            params: r#"{"items":[id]?,"overwrite":bool=false,"rotation":bool=false,"foldSequenceRotation":bool=true}"#,
             enabled: always,
             run: apply_rules,
             journal: true,
@@ -423,8 +477,15 @@ fn set_rules(s: &mut Session, p: &Value) -> Result<Value> {
 /// `project.applyInterpretRules`: give the clips already in the project the colour space their import rule says, and attach the
 /// proxy it names to a clip that has none (checked the same way as at import; a pair that does not fit is reported, not
 /// attached). A clip with its own colour space override is left alone unless `overwrite`; a clip that already has a proxy keeps it.
+///
+/// The rotation a rule names is given to a clip only with `rotation: true`: a project from before the rule may have its clips
+/// stood upright by hand in their sequences. When asked, the clip is turned as `clip.interpretFootage {rotation}` turns it,
+/// `foldSequenceRotation` included; a clip whose rotation is already set (to anything but 0) is kept unless `overwrite`.
 fn apply_rules(s: &mut Session, p: &Value) -> Result<Value> {
     let overwrite = p.get("overwrite").and_then(Value::as_bool).unwrap_or(false);
+    let rotate = p.get("rotation").and_then(Value::as_bool).unwrap_or(false);
+    let fold = p.get("foldSequenceRotation").and_then(Value::as_bool).unwrap_or(true);
+    let mut turns: Vec<(ItemId, u8)> = Vec::new();
     let wanted: Option<Vec<ItemId>> = p.get("items").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).map(ItemId).collect());
     let rules = s.prefs.import_rules.rules.clone();
     let mut changes: Vec<(ItemId, ColorSpace)> = Vec::new();
@@ -440,12 +501,16 @@ fn apply_rules(s: &mut Session, p: &Value) -> Result<Value> {
         if m.proxy.is_none()
             && let Some(found) = find_proxy(&rules, path, &*s.services)
         {
-            match crate::proxies::check_found_proxy(s, &m.info, &item.name, &found) {
+            match crate::proxies::check_found_proxy(s, &m.file_info(), &item.name, &found) {
                 Ok(()) => proxies.push((*id, found)),
                 Err(why) => warnings.push(format!("{}: the proxy {found} was not attached: {why}", item.name)),
             }
         }
-        let Some(cs) = resolve(&rules, path, &*s.services) else { continue };
+        let Some(out) = resolve_outcome(&rules, path, &*s.services) else { continue };
+        if rotate && out.rotation != m.rotation() && (m.rotation() == 0 || overwrite) {
+            turns.push((*id, out.rotation));
+        }
+        let Some(cs) = out.color_space else { continue };
         matched += 1;
         if m.interpret.color_space == Some(cs) {
             continue;
@@ -456,8 +521,18 @@ fn apply_rules(s: &mut Session, p: &Value) -> Result<Value> {
         }
         changes.push((*id, cs));
     }
-    if !changes.is_empty() || !proxies.is_empty() {
+    let (mut folded, mut turned) = (0usize, 0usize);
+    if !changes.is_empty() || !proxies.is_empty() || !turns.is_empty() {
         s.edit("Apply Import Rules", |pr, _| {
+            for (id, q) in &turns {
+                let Some(m) = pr.item_mut(*id).and_then(|it| it.as_media_mut()) else { continue };
+                let old = m.info.video.as_ref().map(|v| (v.width, v.height));
+                let delta = m.set_rotation(*q);
+                if let Some(old_size) = old.filter(|_| delta != 0) {
+                    let (f, t) = pr.turn_sequence_clips(*id, old_size, delta, fold);
+                    (folded, turned) = (folded + f, turned + t);
+                }
+            }
             for (id, cs) in &changes {
                 if let Some(ItemKind::Media(m)) = pr.item_mut(*id).map(|it| &mut it.kind) {
                     m.interpret.color_space = Some(*cs);
@@ -477,6 +552,9 @@ fn apply_rules(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({
         "changed": changes.iter().map(|(i, c)| json!({"item": i.0, "colorSpace": c.id()})).collect::<Vec<_>>(),
         "proxiesAttached": proxies.iter().map(|(i, p)| json!({"item": i.0, "proxy": p})).collect::<Vec<_>>(),
+        "rotated": turns.iter().map(|(i, q)| json!({"item": i.0, "rotation": u32::from(*q) * 90})).collect::<Vec<_>>(),
+        "sequenceClipsFolded": folded,
+        "sequenceClipsTurned": turned,
         "warnings": warnings,
         "matched": matched,
         "keptExistingOverride": kept,

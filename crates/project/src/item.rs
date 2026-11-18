@@ -27,6 +27,28 @@ pub struct Interpretation {
     /// is edited into a sequence. None = one stereo clip of the first two channels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio_channels: Option<AudioChannelMap>,
+    /// Modify ▸ Interpret Footage ▸ Rotation: quarter turns clockwise (0–3) the stored picture is
+    /// turned by to stand upright, for footage a camera stored on its side without saying so in
+    /// the file. Applied where the file is opened (the media pool), so every reader gets upright
+    /// frames; [`MediaClip::info`] holds the turned size. Change it with
+    /// [`MediaClip::set_rotation`], never directly.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub rotation: u8,
+}
+
+fn is_zero_u8(v: &u8) -> bool {
+    *v == 0
+}
+
+/// `info` with its picture turned clockwise by `quarter_turns` × 90°: an odd number of turns
+/// swaps the width with the height and inverts the pixel aspect ratio.
+pub fn turn_info(info: &mut MediaInfo, quarter_turns: u8) {
+    if quarter_turns % 2 == 1
+        && let Some(v) = info.video.as_mut()
+    {
+        (v.width, v.height) = (v.height, v.width);
+        v.par = (v.par.1, v.par.0);
+    }
 }
 
 /// Modify ▸ Audio Channels: the clip channel format and, per audio clip, the source channels it
@@ -106,6 +128,47 @@ impl MediaClip {
     }
     pub fn duration(&self) -> Tick {
         self.info.duration
+    }
+    /// Quarter turns clockwise (0–3) the file's picture is turned by (Interpret Footage ▸
+    /// Rotation). Only the picture of a file turns: a generator draws at the size it was made
+    /// for, and a file without picture has nothing to turn.
+    pub fn rotation(&self) -> u8 {
+        if self.can_rotate() { self.interpret.rotation % 4 } else { 0 }
+    }
+    /// Whether Interpret Footage ▸ Rotation applies: a file with picture.
+    pub fn can_rotate(&self) -> bool {
+        matches!(self.media, MediaRef::File { .. }) && self.info.video.is_some()
+    }
+    /// The media info as the file itself reports it: [`MediaClip::info`] with the rotation taken
+    /// out again. What a file opened without the rotation (a proxy, a relink candidate) is
+    /// compared with.
+    pub fn file_info(&self) -> MediaInfo {
+        let mut info = self.info.clone();
+        turn_info(&mut info, (4 - self.rotation()) % 4);
+        info
+    }
+    /// Take `info`, just read from the file, as this clip's info: turned by the clip's rotation.
+    pub fn set_file_info(&mut self, mut info: MediaInfo) {
+        turn_info(&mut info, self.rotation());
+        self.info = info;
+    }
+    /// Set the rotation (quarter turns clockwise) and turn [`MediaClip::info`] with it. An
+    /// override of the pixel aspect ratio is in the pixels of the picture as shown, so it turns
+    /// too. Returns the turns added (0–3); a clip that cannot be turned
+    /// ([`MediaClip::can_rotate`]) keeps 0.
+    pub fn set_rotation(&mut self, quarter_turns: u8) -> u8 {
+        if !self.can_rotate() {
+            return 0;
+        }
+        let delta = (quarter_turns % 4 + 4 - self.rotation()) % 4;
+        turn_info(&mut self.info, delta);
+        if delta % 2 == 1
+            && let Some(par) = self.interpret.par.as_mut()
+        {
+            *par = (par.1, par.0);
+        }
+        self.interpret.rotation = quarter_turns % 4;
+        delta
     }
 }
 

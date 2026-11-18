@@ -820,8 +820,14 @@ impl Default for ProjectManagerDraft {
 /// Colour dialogs: drafts are applied with one engine command on OK.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ColorDialog {
-    /// `clip.interpretFootage`: the media items and the chosen colour space id ("auto" = metadata).
-    Interpret { items: Vec<u64>, color_space: String },
+    /// `clip.interpretFootage`: the media items, the chosen colour space id ("auto" = metadata)
+    /// and the rotation picked in the dialog (degrees clockwise; None = left as it is).
+    Interpret {
+        items: Vec<u64>,
+        color_space: String,
+        #[serde(default)]
+        rotation: Option<u32>,
+    },
     /// `sequence.colorSettings`.
     Sequence { working_space: String, wide_gamut: bool, auto_tone_map: bool },
 }

@@ -226,6 +226,19 @@ file ──► codecs (MP4/MOV, MKV, audio)        demux + decode, GOP-aware see
   `audio(start, frames, rate)` in media time. Sources are `Send + Sync` and shared by monitors,
   thumbnails, playback and export. The engine's `MediaPool` creates one per project item, lazily,
   through registered openers (`codecs::openers()`: MP4/MOV, MKV/WebM, audio files).
+- **Source rotation.** A container's display rotation (MP4/MOV `tkhd` matrix, Matroska) is
+  applied by the decoders (`VideoFrame::rotated`), so `MediaInfo` and every frame are already
+  upright. Footage stored on its side *without* that flag is stood upright with Interpret
+  Footage: `Interpretation::rotation` (quarter turns clockwise; `clip.interpretFootage
+  {rotation}`, import rules' `rotation`). The media pool applies it where it opens the file
+  (`media_pool::RotatedSource`, around the clip's source, its proxy and a background job's own
+  copy), and `MediaClip::info` holds the turned size (`MediaClip::set_rotation`; `file_info()`
+  is the size as stored, which a proxy or relink candidate is compared with), so the monitors,
+  thumbnails, placement, sequences and exports need no rotation code of their own. Files made
+  from a clip (proxies, transcodes) are written as the clip is stored, so the clip's rotation
+  keeps applying to them. `Project::turn_sequence_clips` moves the Motion anchor of clips
+  already in sequences with the turn and folds a hand-made Motion rotation equal to the turn
+  into the clip, so an existing edit does not turn twice.
 - **Pixel aspect ratio.** Demuxers report it in `VideoStreamInfo::par` (MP4/MOV `pasp`, Matroska
   display size, MXF aspect ratio, MPEG sequence header / VUI); Interpret Footage's
   `Interpretation::par` overrides it (`clip.interpretFootage {pixelAspect}`), and

@@ -299,7 +299,7 @@ fn execute(
                 let fname = Path::new(&w.out).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                 let info = filmcraft_media::open_bytes(&fname, b.into(), &openers).map_err(|e| format!("{}: {e}", w.out))?.info().clone();
                 if let Some(mm) = proj.item_mut(w.item).and_then(|i| i.as_media_mut()) {
-                    mm.info = info;
+                    mm.set_file_info(info);
                     mm.proxy = None;
                 }
             }

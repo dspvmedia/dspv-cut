@@ -176,7 +176,10 @@ no media outside its range, so there a kept In is moved to the subclip's first o
 the result's `sourceInClamped: [ids]` (present with `keepSourceIn`) names the clips it was moved for.
 
 **Colour** (`crates/engine/src/color.rs`): `sequence.colorSettings {workingSpace: rec709|rec2100-pq|
-rec2100-hlg, wideGamut, autoToneMap}`, `clip.interpretFootage {items?, colorSpace?: auto|<id>, pixelAspect?: [num, den]|file}`,
+rec2100-hlg, wideGamut, autoToneMap}`, `clip.interpretFootage {items?, colorSpace?: auto|<id>, pixelAspect?: [num, den]|file, rotation?: 0|90|180|270, foldSequenceRotation?: true}`
+(`rotation` is degrees clockwise, for footage stored on its side with no display rotation in the file: the clip and its proxy are
+read upright everywhere; a clip already stood upright in a sequence with the same Motion rotation has that turn moved into the clip
+unless `foldSequenceRotation` is false, and the result counts `sequenceClipsFolded` / `sequenceClipsTurned`),
 `color.spaces`, `media.colorInfo {item}`; LUTs: `lut.import {path, name?}`, `lut.list`,
 `lut.remove {id}`, `lut.export {lut, path, format?}`, `lumetri.setInputLut` / `lumetri.setLook
 {clip?, lut: lib:<id>|builtin:<id>|"", path?}`, `lumetri.setSection {clip?, section, on?}`,

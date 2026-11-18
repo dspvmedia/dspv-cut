@@ -249,7 +249,9 @@ pub fn check_candidate(s: &Session, item: ItemId, path: &str, o: &MatchOptions) 
                     c.problems.push(format!("media start differs ({:?} vs {:?})", info.start_timecode, m.info.start_timecode));
                 }
                 if o.metadata {
-                    if let (Some(a), Some(b)) = (&info.video, &m.info.video)
+                    // the candidate is compared with the picture as the old file stores it (not as Interpret Footage turns it)
+                    let stored = m.file_info();
+                    if let (Some(a), Some(b)) = (&info.video, &stored.video)
                         && ((a.width, a.height) != (b.width, b.height) || a.frame_rate != b.frame_rate)
                     {
                         c.problems.push(format!(
@@ -343,7 +345,7 @@ fn apply(s: &mut Session, plans: Vec<Plan>, align_timecode: bool, label: &str) -
                     // timecode in its own file's frames (an EDL item's are at the list's rate)
                     shift = info.frame_rate().tick_of(b) - rate.tick_of(a);
                 }
-                m.info = info.clone();
+                m.set_file_info(info.clone());
             }
             proj.shift_media_time(p.item, shift);
             if p.cand.info.is_some() {
