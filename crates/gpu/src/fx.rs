@@ -57,6 +57,7 @@ const OP_BOKEH_BOOST: u32 = 33;
 const OP_BOKEH: u32 = 34;
 const OP_BOKEH_UP: u32 = 35;
 const OP_THREE_WAY: u32 = 36;
+const OP_SCENE_GRADE: u32 = 37;
 
 type Target = (wgpu::Texture, wgpu::TextureView);
 
@@ -257,6 +258,36 @@ fn steps(op: &FxOp, w: u32, h: u32) -> Vec<Step> {
         }
         FxOp::VideoLimiter { max, comp, axis, warn, warning_color } => {
             out.push(step(OP_VIDEO_LIMITER, [*axis, *warn as u32, 0, 0], &[*max, *comp, warning_color[0], warning_color[1], warning_color[2]]));
+        }
+        FxOp::SceneGrade(g) => {
+            let m = g.matrix;
+            let z = g.zones;
+            let p = [
+                m[0][0],
+                m[0][1],
+                m[0][2],
+                m[1][0],
+                m[1][1],
+                m[1][2],
+                m[2][0],
+                m[2][1],
+                m[2][2],
+                g.contrast,
+                g.pivot_stops,
+                z[0].center,
+                z[0].width,
+                z[0].exposure,
+                z[1].center,
+                z[1].width,
+                z[1].exposure,
+                z[2].center,
+                z[2].width,
+                z[2].exposure,
+                g.white,
+                g.desat,
+                g.tone_peak_nits.unwrap_or(0.0),
+            ];
+            out.push(step(OP_SCENE_GRADE, [g.tone_peak_nits.is_some() as u32, g.luminance_stage() as u32, 0, 0], &p));
         }
         FxOp::Lumetri {
             gains,

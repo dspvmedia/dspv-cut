@@ -19,6 +19,7 @@ filmcraft-project = { workspace = true }
 filmcraft-audio-dsp = { workspace = true }
 filmcraft-captions = { workspace = true }
 filmcraft-text = { workspace = true }
+log = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

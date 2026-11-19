@@ -94,7 +94,7 @@ pub fn is_temporal(id: &str) -> bool {
 impl FxEnv for ItemEnv<'_> {
     fn frame(&self, dt: f64, upto: &EffectInstance) -> Option<Image> {
         let t2 = self.t + Tick::from_seconds_f64(dt);
-        let base = crate::base_layer(self.project, self.seq, self.item, t2, self.opts, self.sources, self.want)?;
+        let (base, scene_peak_nits) = crate::base_layer_scene(self.project, self.seq, self.item, t2, self.opts, self.sources, self.want)?;
         let mut img = resize(base, self.layer_size.0, self.layer_size.1);
         let src = crate::source_size(self.project, self.item.item).unwrap_or((1, 1));
         let cx = FxCtx {
@@ -107,13 +107,16 @@ impl FxEnv for ItemEnv<'_> {
             env: None,
             frame_rate: self.seq.settings.frame_rate.as_f64(),
             working: self.seq.settings.color.working,
+            scene_peak_nits,
         };
-        for e in &self.item.effects {
+        // the effects before `upto` in the order they run: the clip's Scene Grade first
+        let grade = crate::scene_grade::active(self.item);
+        for e in crate::scene_grade::render_order(self.item) {
             if std::ptr::eq(e, upto) {
                 break;
             }
-            if e.def().is_some_and(|d| !d.intrinsic) && !filmcraft_project::graphic::is_layer(e) && !is_temporal(&e.effect) {
-                crate::mask::apply_effect(&mut img, e, &cx);
+            if !is_temporal(&e.effect) {
+                crate::mask::apply_effect(&mut img, e, &crate::scene_grade::ctx_for(&cx, e, grade));
             }
         }
         Some(img)

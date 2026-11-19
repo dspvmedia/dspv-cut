@@ -194,6 +194,7 @@ fn graded_stats(img: &Image, base: &EffectInstance, x: &[f32; 10], skin_protect:
         env: None,
         frame_rate: 24.0,
         working: filmcraft_color::WorkingSpace::Rec709,
+        scene_peak_nits: None,
     };
     apply(&mut g, &set_params(base, x), &cx);
     stats(&g, skin_protect)
@@ -364,6 +365,7 @@ mod tests {
             env: None,
             frame_rate: 24.0,
             working: filmcraft_color::WorkingSpace::Rec709,
+            scene_peak_nits: None,
         };
         apply(&mut g, &set_params(base, &x), &cx);
         g

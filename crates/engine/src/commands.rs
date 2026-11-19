@@ -3581,6 +3581,17 @@ fn build() -> Vec<CommandSpec> {
                         // intrinsic effects (Motion) are laid out in the sequence frame, as `reset_params` does
                         let frame = if def.intrinsic { (fw, fh) } else { size };
                         resolve_auto_points(&mut inst, frame, size);
+                        // Scene Grade grades the scene before every other effect sees the picture and
+                        // rolls the highlights off itself: it goes first, and a clip has one
+                        // (the renderer runs the first enabled one first whatever its index)
+                        if def.id == filmcraft_render::scene_grade::ID {
+                            if i.effects.iter().any(|e| e.effect == def.id) {
+                                return Err(bad("effects.apply", "the clip already has a Scene Grade"));
+                            }
+                            i.effects.insert(0, inst);
+                            applied.push(json!({"clip": i.id.0, "index": 0, "effect": def.id}));
+                            continue;
+                        }
                         // at the end of the stack, as in Premiere, so the indices already
                         // handed out (graphics.list effectIndex…) stay valid (#1879); the
                         // renderer applies the intrinsic ones after the standard ones anyway

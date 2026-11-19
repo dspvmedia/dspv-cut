@@ -212,7 +212,8 @@ fn gpu_chain<'a>(project: &Project, item: &'a TrackItem, opts: RenderOptions) ->
         return Some(Vec::new());
     }
     let mut chain = Vec::new();
-    for e in item.effects.iter().filter(|e| e.def().is_some_and(|d| !d.intrinsic) && !filmcraft_project::graphic::is_layer(e)) {
+    // in the order they run: the clip's Scene Grade first ([`crate::scene_grade::render_order`])
+    for e in crate::scene_grade::render_order(item) {
         if !e.enabled {
             continue;
         }
@@ -470,12 +471,15 @@ fn push_item(sc: Scene, item: &TrackItem, extra_opacity: f32, blend: Option<Blen
         let want = (lin * opts.scale as f64).clamp(1.0 / 64.0, 1.0) as f32;
         let time = crate::video_source_time(item, t, src.info().frame_rate());
         let Ok(frame) = src.video_frame(FrameRequest { time, scale: want }) else { return };
-        let cs = crate::colorman::source_space(project, item.item, &frame);
         // HDR, wide-gamut and log media on a Rec. 709 sequence is converted on the GPU too (#965);
         // other pipelines are converted on the CPU (below), and so are blended in-between frames
-        // (Frame Blending / Optical Flow on speed-changed or rate-conformed clips)
+        // (Frame Blending / Optical Flow on speed-changed or rate-conformed clips). A clip's Scene
+        // Grade can ask for another source colour space and the tone map left to the effect
+        // (`colorman::clip_color`, the same decision as the CPU renderer's).
         let pipe = &seq.settings.color;
-        let input = if crate::colorman::needs_management(pipe, cs, &frame) { crate::colorman::gpu_input(project, item.item, pipe, cs, &frame) } else { None };
+        let cc = crate::colorman::clip_color(project, item, &frame, pipe, opts.effects);
+        let cs = cc.space;
+        let input = if crate::colorman::needs_management(pipe, cs, &frame) { crate::colorman::gpu_input(project, item.item, pipe, cc, &frame) } else { None };
         let plain = (input.is_some() || !crate::colorman::needs_management(pipe, cs, &frame))
             && crate::media_interpolation(item, t, &src, seq.settings.frame_rate).is_none();
         if plain && !chain.is_empty() {
@@ -495,8 +499,11 @@ fn push_item(sc: Scene, item: &TrackItem, extra_opacity: f32, blend: Option<Blen
                 env: None,
                 frame_rate: seq.settings.frame_rate.as_f64(),
                 working: seq.settings.color.working,
+                scene_peak_nits: cc.deferred_tone_peak_nits,
             };
-            let ops: Option<Vec<FxOp>> = chain.iter().map(|e| FxOp::eval(e, &cx, lw, lh).filter(FxOp::gpu_ok)).collect();
+            let grade = crate::scene_grade::active(item);
+            let ops: Option<Vec<FxOp>> =
+                chain.iter().map(|e| FxOp::eval(e, &crate::scene_grade::ctx_for(&cx, e, grade), lw, lh).filter(FxOp::gpu_ok)).collect();
             if let Some(ops) = ops {
                 let m = Affine::scale(opts.scale as f64, opts.scale as f64)
                     .then_apply(&motion)

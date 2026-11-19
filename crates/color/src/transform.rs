@@ -184,6 +184,48 @@ pub fn gamut_compress(c: [f32; 3]) -> [f32; 3] {
     })
 }
 
+/// The source peak (cd/m²) of the tone map an HDR or log source gets on entering an SDR working
+/// space, `None` when the source is not tone mapped (SDR media, Auto Tone Map off, an HDR working
+/// space). `src_peak_nits` is the mastering/content peak of PQ media when the file signals it.
+/// [`InputTransform::new`] and the Scene Grade effect decide with this one function.
+pub fn tone_map_peak_nits(src: ColorSpace, pipe: &ColorPipeline, src_peak_nits: Option<f64>) -> Option<f64> {
+    if !(src.is_hdr() && !pipe.working.is_hdr() && pipe.auto_tone_map) {
+        return None;
+    }
+    Some(match src.curve() {
+        Curve::Pq => src_peak_nits.unwrap_or(HDR_PEAK_NITS).clamp(REFERENCE_WHITE_NITS, 10_000.0),
+        Curve::Hlg => HDR_PEAK_NITS,
+        Curve::Log(c) => (c.peak_linear() * REFERENCE_WHITE_NITS).clamp(REFERENCE_WHITE_NITS, LOG_PEAK_NITS),
+        _ => REFERENCE_WHITE_NITS,
+    })
+}
+
+/// The part of [`tone_map_peak_nits`] a clip's Scene Grade can take over from the input transform:
+/// log sources only. The camera-gamut compression keeps max(R,G,B) and the tone map is a ratio on
+/// it, so for log media the two commute and grading before the tone map reproduces today's picture
+/// exactly. The display-gamut desaturation of PQ / HLG / BT.2020 media changes max(R,G,B), so the
+/// tone map cannot move behind it: those sources keep their roll-off at decode.
+pub fn scene_tone_peak_nits(src: ColorSpace, pipe: &ColorPipeline, src_peak_nits: Option<f64>) -> Option<f64> {
+    tone_map_peak_nits(src, pipe, src_peak_nits).filter(|_| src.is_log())
+}
+
+/// [`ToneMap::new`] for `(src_peak_nits, REFERENCE_WHITE_NITS)`, built once per peak: a map is a
+/// 4096-entry table, and a Scene Grade asks for one every frame.
+pub fn shared_tone_map(src_peak_nits: f64) -> std::sync::Arc<ToneMap> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+    static MAPS: OnceLock<Mutex<HashMap<u64, Arc<ToneMap>>>> = OnceLock::new();
+    let maps = MAPS.get_or_init(Default::default);
+    let key = src_peak_nits.to_bits();
+    let mut maps = maps.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    // a handful of peaks exist in practice (one per log curve, PQ metadata values); a hostile
+    // stream of distinct ones must not grow the cache without bound
+    if maps.len() >= 64 {
+        maps.clear();
+    }
+    maps.entry(key).or_insert_with(|| Arc::new(ToneMap::new(src_peak_nits, REFERENCE_WHITE_NITS))).clone()
+}
+
 /// Source → working-space conversion for one colour space.
 #[derive(Clone, Debug)]
 pub struct InputTransform {
@@ -194,6 +236,9 @@ pub struct InputTransform {
     /// HLG OOTF luma weights (BT.2020) and the scale to working units.
     hlg: Option<([f32; 3], f32)>,
     tone: Option<ToneMap>,
+    /// A scene transform ([`InputTransform::new_scene`]): the tone map this log source would get, which
+    /// is left to the clip's Scene Grade, as its source peak in cd/m².
+    deferred_tone_peak: Option<f64>,
     compress: bool,
     /// Display-referred wide-gamut media (BT.2020 / P3 / HDR): desaturate into the working gamut
     /// with these luma weights instead of the camera-gamut compression.
@@ -203,6 +248,27 @@ pub struct InputTransform {
 impl InputTransform {
     /// `src_peak_nits` is the mastering/content peak of PQ media when the file signals it.
     pub fn new(src: ColorSpace, range: Range, pipe: &ColorPipeline, src_peak_nits: Option<f64>) -> Self {
+        Self::build(src, range, pipe, src_peak_nits, false)
+    }
+
+    /// The input transform of a clip whose Scene Grade grades before the highlight roll-off: the
+    /// same curve, matrix and gamut compression, but the tone map is left out and its source peak
+    /// is reported by [`deferred_tone_peak_nits`](Self::deferred_tone_peak_nits) for the effect to
+    /// apply as its last step. The camera-gamut compression keeps max(R,G,B) and the tone map is a
+    /// ratio on it, so the two commute and a neutral Scene Grade reproduces [`new`](Self::new)'s picture.
+    /// Equal to `new` for a source that is not tone mapped, and for display-referred HDR / wide-gamut
+    /// media ([`scene_tone_peak_nits`]: log sources only).
+    pub fn new_scene(src: ColorSpace, range: Range, pipe: &ColorPipeline, src_peak_nits: Option<f64>) -> Self {
+        Self::build(src, range, pipe, src_peak_nits, true)
+    }
+
+    /// The source peak (cd/m²) of the tone map a scene transform left out; `None` for any other
+    /// transform and for a source that is not tone mapped.
+    pub fn deferred_tone_peak_nits(&self) -> Option<f64> {
+        self.deferred_tone_peak
+    }
+
+    fn build(src: ColorSpace, range: Range, pipe: &ColorPipeline, src_peak_nits: Option<f64>, scene: bool) -> Self {
         let curve = src.curve();
         let wg = pipe.working_gamut();
         let m = gamut_matrix(src.gamut(), wg);
@@ -211,20 +277,25 @@ impl InputTransform {
             let l = Gamut::Bt2020.luma();
             ([l[0] as f32, l[1] as f32, l[2] as f32], (HDR_PEAK_NITS / REFERENCE_WHITE_NITS) as f32)
         });
-        let peak = match curve {
-            Curve::Pq => src_peak_nits.unwrap_or(HDR_PEAK_NITS).clamp(REFERENCE_WHITE_NITS, 10_000.0),
-            Curve::Hlg => HDR_PEAK_NITS,
-            Curve::Log(c) => (c.peak_linear() * REFERENCE_WHITE_NITS).clamp(REFERENCE_WHITE_NITS, LOG_PEAK_NITS),
-            _ => REFERENCE_WHITE_NITS,
-        };
-        let tone = (src.is_hdr() && !pipe.working.is_hdr() && pipe.auto_tone_map).then(|| ToneMap::new(peak, REFERENCE_WHITE_NITS));
+        let deferred_tone_peak = scene.then(|| scene_tone_peak_nits(src, pipe, src_peak_nits)).flatten();
+        let tone = tone_map_peak_nits(src, pipe, src_peak_nits).filter(|_| deferred_tone_peak.is_none()).map(|p| ToneMap::new(p, REFERENCE_WHITE_NITS));
         let wider = !identity_matrix && !gamut_within(src.gamut(), wg);
         // camera gamuts (log media) get the soft compression; display gamuts keep their in-gamut
         // colours exactly (BT.709 content in a BT.2020 file comes back unchanged)
         let compress = wider && src.is_log();
         let l = wg.luma();
         let desaturate = (wider && !src.is_log()).then(|| [l[0] as f32, l[1] as f32, l[2] as f32]);
-        InputTransform { source: src, table: DecodeTable::for_curve(curve, range), matrix: to_f32(&m), identity_matrix, hlg, tone, compress, desaturate }
+        InputTransform {
+            source: src,
+            table: DecodeTable::for_curve(curve, range),
+            matrix: to_f32(&m),
+            identity_matrix,
+            hlg,
+            tone,
+            deferred_tone_peak,
+            compress,
+            desaturate,
+        }
     }
 
     /// Whether anything happens after the per-channel table.
@@ -640,5 +711,47 @@ mod tests {
         assert!((hi[0] - 1.0).abs() < 0.01);
         // plain pipeline is an identity
         assert!(OutputTransform::display(&ColorPipeline::REC709).is_identity());
+    }
+
+    /// A scene transform is the ordinary one without its tone map, which it reports instead: the tone map applied to its
+    /// output is the ordinary transform's output (the gamut compression and the ratio on max(R,G,B) commute), for every
+    /// log curve. Display-referred HDR keeps its tone map at decode (its desaturation does not commute).
+    #[test]
+    fn a_scene_transform_leaves_out_exactly_the_tone_map() {
+        let pipe = ColorPipeline::REC709;
+        let mut seen = 0;
+        for cs in ColorSpace::ALL.into_iter().filter(|c| c.is_log()) {
+            let (today, scene) = (InputTransform::new(cs, Range::Full, &pipe, None), InputTransform::new_scene(cs, Range::Full, &pipe, None));
+            let peak = scene.deferred_tone_peak_nits().unwrap_or_else(|| panic!("{}: nothing deferred", cs.id()));
+            assert_eq!(Some(peak), scene_tone_peak_nits(cs, &pipe, None), "{}", cs.id());
+            assert!(today.deferred_tone_peak_nits().is_none());
+            assert!(scene.gpu_params().is_some_and(|g| g.tone.is_none()), "{}", cs.id());
+            let tone = ToneMap::new(peak, REFERENCE_WHITE_NITS);
+            for rgb in
+                [[0.1, 0.1, 0.1], [0.5, 0.4, 0.3], [0.9, 0.2, 0.1], [0.3, 0.8, 0.95], [1.0, 1.0, 1.0], [0.02, 0.5, 0.05], [0.7, 0.7, 0.2], [0.95, 0.05, 0.5]]
+            {
+                let (a, b) = (today.convert(rgb), tone.apply(scene.convert(rgb)));
+                for k in 0..3 {
+                    assert!((a[k] - b[k]).abs() <= 1e-4 * (1.0 + a[k].abs()), "{} {rgb:?}: {a:?} vs {b:?}", cs.id());
+                }
+            }
+            seen += 1;
+        }
+        assert!(seen >= 11, "{seen}");
+        // PQ and HLG: their gamut desaturation changes max(R,G,B), so the tone map stays at decode
+        for cs in ColorSpace::ALL.into_iter().filter(|c| c.is_hdr() && !c.is_log()) {
+            let t = InputTransform::new_scene(cs, Range::Full, &pipe, None);
+            assert!(t.deferred_tone_peak_nits().is_none(), "{}", cs.id());
+            assert_eq!(t.convert([0.9, 0.2, 0.1]), InputTransform::new(cs, Range::Full, &pipe, None).convert([0.9, 0.2, 0.1]), "{}", cs.id());
+        }
+        // SDR, Auto Tone Map off and an HDR working space: nothing to defer, and the transform is the ordinary one
+        let off = ColorPipeline { auto_tone_map: false, ..pipe };
+        for (cs, p) in [(ColorSpace::Rec709, pipe), (ColorSpace::NLogBt2020, off), (ColorSpace::NLogBt2020, hdr(WorkingSpace::Rec2100Pq))] {
+            let t = InputTransform::new_scene(cs, Range::Full, &p, None);
+            assert!(t.deferred_tone_peak_nits().is_none(), "{}", cs.id());
+            assert_eq!(t.convert([0.4, 0.5, 0.6]), InputTransform::new(cs, Range::Full, &p, None).convert([0.4, 0.5, 0.6]));
+        }
+        // one map per peak
+        assert!(std::sync::Arc::ptr_eq(&shared_tone_map(3000.0), &shared_tone_map(3000.0)));
     }
 }

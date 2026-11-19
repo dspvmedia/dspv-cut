@@ -400,6 +400,7 @@ pub fn effect_cost_ms(id: &str) -> f64 {
         | "ultra_key"
         | "four_color_gradient"
         | "lumetri"
+        | "scene_grade"
         | "color_balance"
         | "gamma_correction"
         | "wave_warp"

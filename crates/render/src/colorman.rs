@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use filmcraft_color::{ColorPipeline, ColorSpace, InputTransform, OutputTransform, Range};
 use filmcraft_frame::VideoFrame;
-use filmcraft_project::{ItemId, Project};
+use filmcraft_project::{ItemId, Project, TrackItem};
 
 use crate::Image;
 
@@ -33,7 +33,51 @@ pub fn needs_management(pipe: &ColorPipeline, cs: ColorSpace, frame: &VideoFrame
     !(pipe.is_plain() && default_decode)
 }
 
-type Key = (ColorSpace, Range, ColorPipeline, Option<u32>);
+type Key = (ColorSpace, Range, ColorPipeline, Option<u32>, bool);
+
+/// How a clip's colour management differs from its media item's: what a Scene Grade on the clip
+/// asks of the input transform ([`crate::scene_grade`]). The media item itself is never changed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClipColor {
+    /// The colour space the clip's frames are decoded from: the media's interpretation, or the
+    /// house log curve when the clip's Scene Grade says Source: N-Log.
+    pub space: ColorSpace,
+    /// The source peak (cd/m²) of the tone map the input transform leaves out for the clip's Scene
+    /// Grade to apply as its last step, `None` when the input transform tone maps as usual (no
+    /// Scene Grade, or nothing to tone map).
+    pub deferred_tone_peak_nits: Option<f32>,
+}
+
+impl ClipColor {
+    /// A clip with no Scene Grade: its media's colour space, tone mapped at decode as ever.
+    pub fn plain(space: ColorSpace) -> Self {
+        Self { space, deferred_tone_peak_nits: None }
+    }
+}
+
+/// The colour management of `item`'s frame: its media's colour space ([`source_space`]) unless the
+/// clip's active Scene Grade overrides it, and whether the tone map moves into that effect. Every
+/// path that decodes a clip (the GPU plan, the CPU renderer, export, the CLI) asks this, so they
+/// all see the same picture. `effects` is whether the render shows effects at all.
+pub fn clip_color(project: &Project, item: &TrackItem, frame: &VideoFrame, pipe: &ColorPipeline, effects: bool) -> ClipColor {
+    let media = source_space(project, item.item, frame);
+    let Some(grade) = effects.then(|| crate::scene_grade::active(item)).flatten() else { return ClipColor::plain(media) };
+    let space = if crate::scene_grade::reads_nlog(grade) { ColorSpace::NLogBt2020 } else { media };
+    if !pipe.is_plain() {
+        // a wide-gamut or HDR working space: the effect's luma weights and its roll-off assume Rec. 709
+        // primaries in an SDR sequence, so the clip is decoded as it always was and the grade runs
+        // on the working picture (its source override still applies)
+        static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            log::warn!(
+                "Scene Grade: the sequence's colour pipeline is not plain Rec. 709; the highlight roll-off stays at decode and the grade works after it"
+            );
+        }
+        return ClipColor::plain(space);
+    }
+    let peak = filmcraft_color::scene_tone_peak_nits(space, pipe, source_peak_nits(project, item.item).map(f64::from));
+    ClipColor { space, deferred_tone_peak_nits: peak.map(|p| p as f32) }
+}
 
 /// The content peak (cd/m²) of an item's HDR metadata (MaxCLL, else the mastering display peak),
 /// following subclips to their media. Used as the tone-mapping source peak of PQ media.
@@ -43,13 +87,20 @@ pub fn source_peak_nits(project: &Project, item: ItemId) -> Option<f32> {
 
 /// A cached input transform (`peak_nits`: the PQ content peak from the file's HDR metadata).
 pub fn input_transform(cs: ColorSpace, range: Range, pipe: &ColorPipeline, peak_nits: Option<f32>) -> Arc<InputTransform> {
+    input_transform_for(cs, range, pipe, peak_nits, false)
+}
+
+/// [`input_transform`], or with `scene` the transform of a clip whose Scene Grade applies the tone map
+/// (`InputTransform::new_scene`). The two are cached apart.
+pub fn input_transform_for(cs: ColorSpace, range: Range, pipe: &ColorPipeline, peak_nits: Option<f32>, scene: bool) -> Arc<InputTransform> {
     static C: OnceLock<Mutex<HashMap<Key, Arc<InputTransform>>>> = OnceLock::new();
     let c = C.get_or_init(Default::default);
-    let key = (cs, range, *pipe, peak_nits.map(|p| p.round() as u32));
+    let key = (cs, range, *pipe, peak_nits.map(|p| p.round() as u32), scene);
     if let Some(t) = c.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
         return t.clone();
     }
-    let t = Arc::new(InputTransform::new(cs, range, pipe, key.3.map(f64::from)));
+    let peak = key.3.map(f64::from);
+    let t = Arc::new(if scene { InputTransform::new_scene(cs, range, pipe, peak) } else { InputTransform::new(cs, range, pipe, peak) });
     c.lock().unwrap_or_else(|e| e.into_inner()).insert(key, t.clone());
     t
 }
@@ -58,7 +109,8 @@ pub fn input_transform(cs: ColorSpace, range: Range, pipe: &ColorPipeline, peak_
 /// frame of display-referred HDR, wide-gamut or log media (PQ, HLG, BT.2020, P3, S-Log3, N-Log, ...)
 /// on a plain pipeline, whose working → monitor transform is the identity. None for RGB frames and
 /// other pipelines, which [`decode`] converts on the CPU.
-pub fn gpu_input(project: &Project, item: ItemId, pipe: &ColorPipeline, cs: ColorSpace, frame: &VideoFrame) -> Option<Arc<InputTransform>> {
+pub fn gpu_input(project: &Project, item: ItemId, pipe: &ColorPipeline, cc: ClipColor, frame: &VideoFrame) -> Option<Arc<InputTransform>> {
+    let cs = cc.space;
     // `FILMCRAFT_CPU_LOG=1` keeps log media on the CPU path: a way to compare the two, and to rule the GPU path out
     static CPU_LOG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     if cs.is_log() && *CPU_LOG.get_or_init(|| std::env::var_os("FILMCRAFT_CPU_LOG").is_some_and(|v| v != "0")) {
@@ -67,13 +119,19 @@ pub fn gpu_input(project: &Project, item: ItemId, pipe: &ColorPipeline, cs: Colo
     if !pipe.is_plain() || !matches!(frame.data, filmcraft_frame::PixelData::Yuv8 { .. } | filmcraft_frame::PixelData::Yuv16 { .. }) {
         return None;
     }
-    let t = input_transform(cs, frame.color.range, pipe, source_peak_nits(project, item));
+    let t = input_transform_for(cs, frame.color.range, pipe, source_peak_nits(project, item), cc.deferred_tone_peak_nits.is_some());
     t.gpu_params().map(|_| t)
 }
 
 /// Decode a frame of `item` (box-decimated by `n`) into the working space of `pipe`.
 pub fn decode(project: &Project, item: ItemId, frame: &VideoFrame, n: usize, pipe: &ColorPipeline) -> Image {
-    let cs = source_space(project, item, frame);
+    decode_clip(project, item, frame, n, pipe, ClipColor::plain(source_space(project, item, frame)))
+}
+
+/// [`decode`] of a clip's frame as [`clip_color`] decided: from `cc.space`, with the tone map left
+/// out when the clip's Scene Grade applies it.
+pub fn decode_clip(project: &Project, item: ItemId, frame: &VideoFrame, n: usize, pipe: &ColorPipeline, cc: ClipColor) -> Image {
+    let cs = cc.space;
     if !needs_management(pipe, cs, frame) {
         let (w, h, px) = frame.to_linear_f32_decimated(n);
         return Image { w, h, px };
@@ -83,7 +141,7 @@ pub fn decode(project: &Project, item: ItemId, frame: &VideoFrame, n: usize, pip
         filmcraft_frame::PixelData::Rgba8(_) | filmcraft_frame::PixelData::RgbaF32(_) => Range::Full,
         _ => frame.color.range,
     };
-    let t = input_transform(cs, range, pipe, source_peak_nits(project, item));
+    let t = input_transform_for(cs, range, pipe, source_peak_nits(project, item), cc.deferred_tone_peak_nits.is_some());
     let float_src = matches!(frame.data, filmcraft_frame::PixelData::RgbaF32(_));
     // float frames are linear already: only the gamut/tone stages apply to them
     let (w, h, px) = frame.to_linear_f32_decimated_with(n, if float_src { None } else { Some(&t.table) });

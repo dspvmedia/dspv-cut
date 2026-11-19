@@ -40,6 +40,39 @@ pub const LIGHT_IDS: [[&str; 8]; 5] = [
 ];
 const LIGHT_GROUPS: [&str; 5] = ["Light 1", "Light 2", "Light 3", "Light 4", "Light 5"];
 
+/// The Source choices of Scene Grade: the clip's own interpretation, or the house log curve.
+pub const SCENE_GRADE_SOURCES: &[&str] = &["Use interpretation", "N-Log"];
+
+/// Scene Grade's parameters. Every default is neutral: a Scene Grade left alone reproduces the
+/// picture the clip has without one.
+fn scene_grade_params() -> Vec<ParamDef> {
+    let mut v = vec![
+        grp(ch("source", "Source", SCENE_GRADE_SOURCES, 0), "Source"),
+        grp(fs("kelvin", "Kelvin", 6500.0, (1667.0, 25_000.0), (2000.0, 12_000.0), "K", 0), "Input"),
+        grp(fs("tint", "Tint", 0.0, (-100.0, 100.0), (-100.0, 100.0), "", 1), "Input"),
+        grp(fs("exposure", "Exposure", 0.0, (-10.0, 10.0), (-4.0, 4.0), "stops", 2), "Input"),
+        grp(fs("gain_r", "Red Gain", 1.0, (0.0, 16.0), (0.0, 4.0), "", 3), "Primaries"),
+        grp(fs("gain_g", "Green Gain", 1.0, (0.0, 16.0), (0.0, 4.0), "", 3), "Primaries"),
+        grp(fs("gain_b", "Blue Gain", 1.0, (0.0, 16.0), (0.0, 4.0), "", 3), "Primaries"),
+        grp(fs("contrast", "Contrast", 1.0, (0.05, 8.0), (0.5, 2.5), "", 2), "Tone"),
+        grp(fs("pivot", "Pivot", 0.18, (0.001, 4.0), (0.05, 0.5), "", 3), "Tone"),
+    ];
+    // each zone: where it sits (stops from 18 % grey), how wide it is (stops) and its exposure (stops)
+    let zone = |ids: [&'static str; 3], labels: [&'static str; 3], centre: f64, width: f64| {
+        [
+            grp(fs(ids[0], labels[0], centre, (-12.0, 12.0), (-8.0, 8.0), "stops", 2), "Zones"),
+            grp(fs(ids[1], labels[1], width, (0.0, 16.0), (0.5, 6.0), "stops", 2), "Zones"),
+            grp(fs(ids[2], labels[2], 0.0, (-6.0, 6.0), (-3.0, 3.0), "stops", 2), "Zones"),
+        ]
+    };
+    v.extend(zone(["dark_center", "dark_width", "dark_exposure"], ["Dark Center", "Dark Width", "Dark Exposure"], -3.0, 2.0));
+    v.extend(zone(["shadow_center", "shadow_width", "shadow_exposure"], ["Shadow Center", "Shadow Width", "Shadow Exposure"], -1.4, 2.5));
+    v.extend(zone(["highlight_center", "highlight_width", "highlight_exposure"], ["Highlight Center", "Highlight Width", "Highlight Exposure"], 5.5, 3.0));
+    v.push(grp(fs("white", "White Level", 1.0, (0.0, 4.0), (0.5, 1.5), "", 3), "Output"));
+    v.push(grp(fs("desat", "Highlight Desaturation", 0.0, (0.0, 1.0), (0.0, 1.0), "", 2), "Output"));
+    v
+}
+
 fn pct(id: &'static str, label: &'static str, def: f64) -> ParamDef {
     f(id, label, def, 0.0, 100.0, "%")
 }
@@ -314,6 +347,8 @@ pub(super) fn defs() -> Vec<EffectDef> {
                 col("color", "Color", [0.0, 0.0, 0.0, 1.0]),
             ],
         ),
+        // DSPV: grades the clip's scene-linear picture before the highlight roll-off (`filmcraft_render::scene_grade`)
+        video("scene_grade", "Scene Grade", COLOR_CORR, scene_grade_params()),
         // ---- Distort ----
         video(
             "corner_pin",
@@ -1132,6 +1167,7 @@ pub(super) fn apply_badges(v: &mut [EffectDef]) {
                 | "gaussian_blur"
                 | "asc_cdl"
                 | "lumetri"
+                | "scene_grade"
                 | "video_limiter"
                 | "vignette"
                 | "magnify"
@@ -1238,6 +1274,9 @@ mod tests {
         ("Video", &["Metadata & Timecode Burn-in"]),
     ];
 
+    /// Effects DSPV Cut adds to a Premiere folder (not part of the catalogue count above).
+    const DSPV_ADDITIONS: &[(&str, &str)] = &[("Color Correction", "Scene Grade")];
+
     const LEGACY_NAMES: &[&str] = &[
         "Alpha Glow",
         "Block Dissolve",
@@ -1276,7 +1315,7 @@ mod tests {
             if f == "Obsolete" {
                 continue;
             }
-            let listed = CATALOGUE.iter().any(|(cf, names)| *cf == f && names.contains(&d.name));
+            let listed = CATALOGUE.iter().any(|(cf, names)| *cf == f && names.contains(&d.name)) || DSPV_ADDITIONS.contains(&(f, d.name));
             assert!(listed, "{} in {f} is not in Premiere's list", d.name);
         }
         for name in LEGACY_NAMES {
