@@ -485,6 +485,8 @@ fn build_effects() -> Vec<EffectDef> {
                 grp(f("hsl_tint", "Tint", 0.0, -100.0, 100.0, ""), "HSL Secondary"),
                 grp(fs("hsl_sat", "Saturation", 100.0, (0.0, 200.0), (0.0, 200.0), "", 1), "HSL Secondary"),
                 grp(f("hsl_hue_shift", "Hue Shift", 0.0, -180.0, 180.0, "°"), "HSL Secondary"),
+                grp(fs("hsl_exposure", "Exposure", 0.0, (-5.0, 5.0), (-5.0, 5.0), "", 1), "HSL Secondary"),
+                grp(f("hsl_contrast", "Contrast", 0.0, -100.0, 100.0, ""), "HSL Secondary"),
                 grp(b("vignette_on", "Vignette", true), "Vignette"),
                 grp(f("vignette_amount", "Amount", 0.0, -5.0, 5.0, ""), "Vignette"),
                 grp(f("vignette_midpoint", "Midpoint", 50.0, 0.0, 100.0, ""), "Vignette"),

@@ -192,3 +192,102 @@ fn hsl_refine_blur_softens_the_key() {
     let speck = img.get(3, 3);
     assert!(speck[0] > speck[1], "speckle left alone after denoise: {speck:?}");
 }
+
+// HSL Secondary ▸ Correction ▸ Exposure / Contrast
+
+/// A tan patch (HSL hue 30°, saturation 30 %, lightness 45 %, the Hawkscrest floor) beside a
+/// warm white (hue 30°, saturation 5 %, lightness 85 %, the walls), in display (sRGB) values.
+/// HSL saturation grows near white, so a wall that reads 5 % is only ±0.75 % per channel.
+const TAN: [f32; 3] = [0.585, 0.45, 0.315];
+
+fn tan_and_white() -> Image {
+    let mut img = Image::new(2, 1);
+    let warm_white = filmcraft_color::hsl_to_rgb(30.0 / 360.0, 0.05, 0.85);
+    for (i, c) in [TAN, warm_white].iter().enumerate() {
+        let lin = c.map(filmcraft_color::srgb_to_linear);
+        img.px[i * 4..i * 4 + 4].copy_from_slice(&[lin[0], lin[1], lin[2], 1.0]);
+    }
+    img
+}
+
+/// A floor key like Hawkscrest's: centred on 30° (range 40°), saturation from 15 %.
+fn floor_key(extra: &[(&str, ParamValue)]) -> EffectInstance {
+    let mut p = vec![("hsl_on", ParamValue::Bool(true)), ("hsl_hue", F(30.0)), ("hsl_hue_range", F(40.0)), ("hsl_sat_min", F(15.0))];
+    p.extend(extra.iter().cloned());
+    lumetri(&p)
+}
+
+fn graded(e: &EffectInstance) -> Image {
+    let mut img = tan_and_white();
+    apply(&mut img, e, &cx(WorkingSpace::Rec709));
+    img
+}
+
+fn display(img: &Image, x: usize) -> [f32; 3] {
+    let p = img.get(x, 0);
+    [p[0], p[1], p[2]].map(filmcraft_color::linear_to_srgb)
+}
+
+#[test]
+fn hsl_exposure_and_contrast_at_zero_render_older_grades_bit_identical() {
+    let with = floor_key(&[("hsl_exposure", F(0.0)), ("hsl_contrast", F(0.0)), ("hsl_sat", F(120.0))]);
+    let mut without = with.clone();
+    without.params.remove("hsl_exposure");
+    without.params.remove("hsl_contrast");
+    assert_eq!(graded(&with).px, graded(&without).px);
+}
+
+#[test]
+fn hsl_exposure_brightens_the_keyed_tan_and_leaves_the_warm_white() {
+    let base = graded(&floor_key(&[]));
+    let lifted = graded(&floor_key(&[("hsl_exposure", F(1.0))]));
+    // the tan is fully inside the key: its display value goes up by 2^(1/2.4), hue kept
+    let (b, l) = (display(&base, 0), display(&lifted, 0));
+    let g = 2f32.powf(1.0 / 2.4);
+    for k in 0..3 {
+        assert!((l[k] - b[k] * g).abs() < 2e-3, "channel {k}: {b:?} -> {l:?}, want ×{g}");
+    }
+    // the warm white is below Saturation Min: not one bit moves
+    assert_eq!(base.get(1, 0), lifted.get(1, 0));
+    // a darker exposure works the same way down
+    let dark = display(&graded(&floor_key(&[("hsl_exposure", F(-1.0))])), 0);
+    assert!((dark[1] - b[1] / g).abs() < 2e-3, "{dark:?}");
+}
+
+#[test]
+fn hsl_contrast_moves_the_keyed_luma_along_the_basic_curve_and_keeps_hue() {
+    let base = display(&graded(&floor_key(&[])), 0);
+    let more = display(&graded(&floor_key(&[("hsl_contrast", F(100.0))])), 0);
+    let less = display(&graded(&floor_key(&[("hsl_contrast", F(-100.0))])), 0);
+    let luma = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    // the tan sits below mid grey: more contrast darkens it, less lifts it toward 0.5
+    assert!(luma(more) < luma(base) - 0.005 && luma(less) > luma(base) + 0.005, "{base:?} {more:?} {less:?}");
+    // a scale, not a per-channel curve: the channel ratios hold
+    for c in [more, less] {
+        assert!((c[0] / c[2] - base[0] / base[2]).abs() < 1e-3, "{c:?} vs {base:?}");
+    }
+    // the warm white stays put
+    assert_eq!(graded(&floor_key(&[])).get(1, 0), graded(&floor_key(&[("hsl_contrast", F(50.0))])).get(1, 0));
+}
+
+#[test]
+fn hsl_show_mask_views_ignore_exposure_and_contrast() {
+    for mode in 1..=3 {
+        let plain = graded(&floor_key(&[("hsl_show_mask", ParamValue::Choice(mode))]));
+        let corrected = graded(&floor_key(&[("hsl_show_mask", ParamValue::Choice(mode)), ("hsl_exposure", F(2.0)), ("hsl_contrast", F(60.0))]));
+        assert_eq!(plain.px, corrected.px, "Show Mask mode {mode}");
+    }
+}
+
+#[test]
+fn hsl_exposure_keeps_hdr_headroom() {
+    // in PQ the tan's corrected value is scaled back by the pixel's HDR scale, not clipped at 1
+    let e = floor_key(&[("hsl_exposure", F(1.0))]);
+    let mut img = Image::new(1, 1);
+    let lin = TAN.map(filmcraft_color::srgb_to_linear).map(|v| v * 4.0);
+    img.px.copy_from_slice(&[lin[0], lin[1], lin[2], 1.0]);
+    let before = img.get(0, 0);
+    apply(&mut img, &e, &cx(WorkingSpace::Rec2100Pq));
+    let after = img.get(0, 0);
+    assert!(after[0] > before[0] * 1.2 && after[0].is_finite(), "{before:?} -> {after:?}");
+}
