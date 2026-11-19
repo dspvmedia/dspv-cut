@@ -435,7 +435,7 @@ fn remove_retakes(s: &mut Session, p: &Value) -> Result<Value> {
                 json!({"from": r.cut.start, "to": r.cut.end - 1, "cut": text(r.cut.clone()), "kept": text(r.restart..kept_end)})
             })
             .collect();
-        let seconds: f64 = ranges.iter().map(|r| r.duration.0 as f64 / TICKS_PER_SECOND as f64).sum();
+        let seconds = ranges.iter().map(|r| r.duration.0).sum::<i64>() as f64 / TICKS_PER_SECOND as f64;
         return Ok(json!({"retakes": list, "seconds": seconds, "dryRun": true}));
     }
     remove_ranges(s, "Remove Retakes", ranges)
