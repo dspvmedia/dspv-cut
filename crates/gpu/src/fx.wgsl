@@ -468,11 +468,12 @@ fn scene_grade_op(c0: vec3<f32>) -> vec3<f32> {
             out = c * k;
         }
     }
+    // how hard the shoulder pressed this pixel, on the roll-off alone (before the white level)
+    let press = clamp(1.0 - max(max(out.x, out.y), out.z) / max(before, 1e-9), 0.0, 1.0);
     out = out * u.p5.x;
-    // path to white: how hard the shoulder pressed this pixel pulls it towards its own luma
+    // path to white: the press pulls the pixel towards its own luma
     let desat = u.p5.y;
     if desat > 0.0 && tone {
-        let press = clamp(1.0 - max(max(out.x, out.y), out.z) / max(before, 1e-9), 0.0, 1.0);
         let yo = luma709(out);
         out = out + (vec3(yo) - out) * (desat * press);
     }

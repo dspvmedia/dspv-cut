@@ -690,21 +690,9 @@ fn media_image(project: &Project, seq: &Sequence, item: &TrackItem, t: Tick, mf:
 }
 
 /// A track item's picture at timeline `t` before any effect (decoded, colour managed, frame
-/// blended; nested sequences rendered; graphics rasterised), at `want` of its source size.
-pub(crate) fn base_layer(
-    project: &Project,
-    seq: &Sequence,
-    item: &TrackItem,
-    t: Tick,
-    opts: RenderOptions,
-    sources: &dyn SourceProvider,
-    want: f32,
-) -> Option<Image> {
-    base_layer_scene(project, seq, item, t, opts, sources, want).map(|(img, _)| img)
-}
-
-/// [`base_layer`] and the source peak of the tone map its colour management left to the clip's
-/// Scene Grade (`FxCtx::scene_peak_nits`), which the clip's effects must apply.
+/// blended; nested sequences rendered; graphics rasterised), at `want` of its source size, and the
+/// source peak of the tone map its colour management left to the clip's Scene Grade
+/// (`FxCtx::scene_peak_nits`), which the clip's effects must apply.
 pub(crate) fn base_layer_scene(
     project: &Project,
     seq: &Sequence,

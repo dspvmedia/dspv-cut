@@ -123,7 +123,14 @@ impl FxEnv for ItemEnv<'_> {
     }
     fn source_frame(&self, dt: f64, scale: f32) -> Option<Image> {
         let t2 = self.t + Tick::from_seconds_f64(dt);
-        crate::base_layer(self.project, self.seq, self.item, t2, self.opts, self.sources, scale.clamp(1.0 / 64.0, 1.0))
+        let (mut img, scene_peak_nits) = crate::base_layer_scene(self.project, self.seq, self.item, t2, self.opts, self.sources, scale.clamp(1.0 / 64.0, 1.0))?;
+        // analyses (Warp Stabilizer, Auto Reframe) see the clip's usual display-referred picture: the
+        // roll-off a Scene Grade takes over is applied here, so a Scene Grade never changes them
+        if let Some(peak) = scene_peak_nits {
+            let tone = filmcraft_color::shared_tone_map(f64::from(peak));
+            img.map_rgb(|c, _, _| tone.apply(c));
+        }
+        Some(img)
     }
     fn track(&self, index: usize) -> Option<Image> {
         if index >= self.seq.video_tracks.len() {

@@ -295,6 +295,30 @@ fn defaults_are_neutral() {
     }
 }
 
+/// Highlight desaturation follows the shoulder only: a colour below the knee keeps its saturation
+/// whatever the White Level (the press is measured on the roll-off, before the white level), and a
+/// colour the shoulder compresses moves towards its luma.
+#[test]
+fn highlight_desaturation_leaves_colours_below_the_knee_alone() {
+    let peak = 3000.0;
+    let tone = filmcraft_color::shared_tone_map(f64::from(peak));
+    let p = eval(&grade(&[("desat", 1.0), ("white", 0.92)]), &neutral_cx(Some(peak)));
+    // a saturated mid tone, well under the knee: the roll-off times the white level (to the
+    // table's own ripple), not pulled towards grey by desat · (1 − white)
+    let mid = [0.20, 0.10, 0.03];
+    let rolled = tone.apply(mid);
+    let got = grade_pixel(mid, &p, Some(&tone));
+    for k in 0..3 {
+        assert!((got[k] - rolled[k] * 0.92).abs() <= 5e-4 * rolled[0], "{got:?} vs {rolled:?}");
+    }
+    // a bright orange the shoulder presses: less saturated than the plain roll-off
+    let hot = [6.0, 3.0, 0.5];
+    let plain = tone.apply(hot).map(|v| v * 0.92);
+    let got = grade_pixel(hot, &p, Some(&tone));
+    let spread = |c: [f32; 3]| (c[0] - c[2]) / c[0].max(1e-9);
+    assert!(spread(got) < spread(plain) - 0.01, "{got:?} vs {plain:?}");
+}
+
 #[test]
 fn hostile_parameters_give_a_finite_grade() {
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e30, -1e30] {

@@ -282,15 +282,18 @@ pub fn grade_pixel(c: [f32; 3], p: &SceneParams, tone: Option<&ToneMap>) -> [f32
         c = c.map(|v| v * k);
     }
     let before = c[0].max(c[1]).max(c[2]);
-    let mut out = match tone {
+    let rolled = match tone {
         Some(t) => t.apply(c),
         None => c,
     };
-    out = out.map(|v| v * p.white);
-    // path to white: how hard the shoulder pressed this pixel pulls it towards its own luma; only
-    // where a tone map ran (without a shoulder there is nothing to follow)
+    // how hard the shoulder pressed this pixel: measured on the roll-off alone, before the white
+    // level, so it is 0 below the knee whatever White Level is (scene.py measured it after the white
+    // level, which desaturated every pixel by desat · (1 − white); the engine follows the design)
+    let press = (1.0 - rolled[0].max(rolled[1]).max(rolled[2]) / before.max(1e-9)).clamp(0.0, 1.0);
+    let mut out = rolled.map(|v| v * p.white);
+    // path to white: the press pulls the pixel towards its own luma; only where a tone map ran
+    // (without a shoulder there is nothing to follow)
     if p.desat > 0.0 && tone.is_some() {
-        let press = (1.0 - out[0].max(out[1]).max(out[2]) / before.max(1e-9)).clamp(0.0, 1.0);
         let f = p.desat * press;
         let yo = filmcraft_color::luma709(out[0], out[1], out[2]);
         out = out.map(|v| v + (yo - v) * f);
