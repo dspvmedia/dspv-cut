@@ -179,3 +179,36 @@ fn generate_without_a_transcriber() {
     let r = s.execute("transcript.generate", json!({})).unwrap();
     assert!(r["items"].as_array().unwrap().len() >= 2, "{r}");
 }
+
+#[test]
+fn remove_retakes_previews_then_cuts_in_one_undo_step() {
+    let (mut s, item, _) = session();
+    let sin = s.active_sequence().unwrap().audio_tracks[0].items[0].source_in;
+    // "This home has, um, this home has a big yard." — a false start, then the kept take
+    let mut t = Transcript { language: "en".into(), ..Default::default() };
+    for (i, text) in ["This", "home", "has,", "um,", "this", "home", "has", "a", "big", "yard."].iter().enumerate() {
+        let a = 0.2 + i as f64 * 0.3;
+        t.words.push(Word::new(*text, sin + Tick::from_seconds_f64(a), sin + Tick::from_seconds_f64(a + 0.28)));
+    }
+    t.normalize();
+    s.transcriber = Some(Arc::new(FixedTranscriber { transcript: t, id: "fixed".into() }));
+    s.execute("transcript.generate", json!({"items": [item.0]})).unwrap();
+    let before = s.active_sequence().unwrap().duration();
+
+    let r = s.execute("transcript.removeRetakes", json!({"dryRun": true})).unwrap();
+    let list = r["retakes"].as_array().unwrap();
+    assert_eq!(list.len(), 1, "{r}");
+    assert_eq!(list[0]["cut"], "This home has, um,");
+    assert_eq!((list[0]["from"].as_u64(), list[0]["to"].as_u64()), (Some(0), Some(3)));
+    assert_eq!(words(&mut s).len(), 10, "a dry run edits nothing");
+
+    let r = s.execute("transcript.removeRetakes", json!({})).unwrap();
+    assert_eq!(r["removed"], 1, "{r}");
+    assert_eq!(words(&mut s).join(" "), "this home has a big yard.");
+    assert!(s.active_sequence().unwrap().duration() < before);
+    s.active_sequence().unwrap().check().unwrap();
+
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(words(&mut s).len(), 10, "one undo brings the retake back");
+    assert!(s.execute("transcript.removeRetakes", json!({"minCoverage": 2.0})).is_err());
+}

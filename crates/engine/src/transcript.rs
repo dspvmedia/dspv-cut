@@ -405,6 +405,42 @@ fn remove_fillers(s: &mut Session, p: &Value) -> Result<Value> {
     remove_ranges(s, "Remove Filler Words", ranges)
 }
 
+/// Ripple-delete earlier attempts of a line the speaker started again, keeping the last attempt.
+/// `dryRun` lists what would go (word indices and text) without editing.
+fn remove_retakes(s: &mut Session, p: &Value) -> Result<Value> {
+    let words = sequence_words(s);
+    let d = tx::RetakeRules::default();
+    let min_coverage = f64_p(p, "minCoverage").unwrap_or(d.min_coverage);
+    if !(0.0..=1.0).contains(&min_coverage) {
+        return Err(bad("transcript.removeRetakes", "minCoverage must be between 0 and 1"));
+    }
+    let rules = tx::RetakeRules {
+        min_words: u64_p(p, "minWords").map_or(d.min_words, |n| n.max(1) as usize),
+        min_coverage,
+        max_span: f64_p(p, "maxSeconds").map_or(d.max_span, Tick::from_seconds_f64),
+        fillers: match p.get("fillers").and_then(Value::as_array) {
+            Some(a) => a.iter().filter_map(Value::as_str).map(str::to_string).collect(),
+            None => d.fillers,
+        },
+    };
+    let found = tx::find_retakes(&words, &rules);
+    let hits: Vec<_> = found.iter().map(|r| r.cut.clone()).collect();
+    let ranges = tx::filler_ranges(&words, &hits, s.sequence_rate());
+    if bool_p(p, "dryRun").unwrap_or(false) {
+        let text = |r: std::ops::Range<usize>| words[r].iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ");
+        let list: Vec<Value> = found
+            .iter()
+            .map(|r| {
+                let kept_end = (r.restart + (r.cut.end - r.cut.start) + 2).min(words.len());
+                json!({"from": r.cut.start, "to": r.cut.end - 1, "cut": text(r.cut.clone()), "kept": text(r.restart..kept_end)})
+            })
+            .collect();
+        let seconds: f64 = ranges.iter().map(|r| r.duration.0 as f64 / TICKS_PER_SECOND as f64).sum();
+        return Ok(json!({"retakes": list, "seconds": seconds, "dryRun": true}));
+    }
+    remove_ranges(s, "Remove Retakes", ranges)
+}
+
 fn create_captions(s: &mut Session, p: &Value) -> Result<Value> {
     let words = sequence_words(s);
     let d = CaptionRules::default();
@@ -510,6 +546,15 @@ pub fn commands() -> Vec<CommandSpec> {
             true,
         ),
         spec("transcript.removeFillers", "Remove Filler Words", &["Sequence", "Transcript"], r#"{"fillers":[str]?}"#, has_transcript, remove_fillers, true),
+        spec(
+            "transcript.removeRetakes",
+            "Remove Retakes",
+            &["Sequence", "Transcript"],
+            r#"{"minWords":n?,"minCoverage":f?,"maxSeconds":f?,"fillers":[str]?,"dryRun":bool?}"#,
+            has_transcript,
+            remove_retakes,
+            true,
+        ),
         spec(
             "transcript.createCaptions",
             "Create Captions from Transcript…",

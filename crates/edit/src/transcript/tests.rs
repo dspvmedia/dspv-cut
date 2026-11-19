@@ -362,3 +362,79 @@ fn a_long_repeated_prefix_does_not_make_search_quadratic() {
     // (a quadratic search would need ~10^8 comparisons here; the result is the check, not a clock)
     assert!(search(&words, &query).is_empty());
 }
+
+/// The words of `text`, spoken back to back from 0 s, 0.3 s each.
+fn line(text: &str) -> Vec<SeqWord> {
+    text.split_whitespace()
+        .enumerate()
+        .map(|(i, x)| {
+            let mut w = sw(x, i);
+            (w.start, w.end) = (s(i as f64 * 0.3), s((i + 1) as f64 * 0.3));
+            w
+        })
+        .collect()
+}
+
+fn cut_text(w: &[SeqWord], r: &[Retake]) -> Vec<String> {
+    r.iter().map(|x| texts(&w[x.cut.clone()]).join(" ")).collect()
+}
+
+#[test]
+fn a_false_start_is_cut_and_the_last_attempt_kept() {
+    let w = line("I went to the, I went to the, I went to the store.");
+    let r = find_retakes(&w, &RetakeRules::default());
+    assert_eq!(cut_text(&w, &r), vec!["I went to the,", "I went to the,"]);
+    assert_eq!(r[1].restart, 8);
+    // fillers inside the attempt go with it and don't break the match
+    let w = line("This home has um a big, this home has a big yard.");
+    assert_eq!(cut_text(&w, &find_retakes(&w, &RetakeRules::default())), vec!["This home has um a big,"]);
+}
+
+#[test]
+fn a_line_said_again_with_one_word_changed_is_a_retake() {
+    let w = line("Welcome to this beautiful home in Irvine. Welcome to this stunning home in Irvine.");
+    let r = find_retakes(&w, &RetakeRules::default());
+    assert_eq!(cut_text(&w, &r), vec!["Welcome to this beautiful home in Irvine."]);
+    // strict rules keep it
+    let strict = RetakeRules { min_coverage: 1.0, ..Default::default() };
+    assert!(find_retakes(&w, &strict).is_empty());
+}
+
+#[test]
+fn repeated_openings_short_repeats_and_other_voices_are_not_retakes() {
+    let d = RetakeRules::default();
+    // the same opening on purpose (3 of 4 words repeated is under 0.8)
+    let w = line("It's close to schools. It's close to the beach.");
+    assert!(find_retakes(&w, &d).is_empty(), "{:?}", find_retakes(&w, &d));
+    // fewer than three repeated words
+    let w = line("No, no, it sold in a week.");
+    assert!(find_retakes(&w, &d).is_empty());
+    // the same line from another speaker is an answer, not a retake
+    let mut w = line("I went to the store. I went to the store.");
+    for x in &mut w[5..] {
+        x.speaker = Some("B".into());
+    }
+    assert!(find_retakes(&w, &d).is_empty());
+    // too far apart
+    let mut w = line("I went to the, I went to the store.");
+    for x in &mut w[4..] {
+        (x.start, x.end) = (x.start + s(20.0), x.end + s(20.0));
+    }
+    assert!(find_retakes(&w, &d).is_empty());
+}
+
+#[test]
+fn retakes_ripple_delete_to_the_kept_take() {
+    let mut w = line("I went to the, I went to the store.");
+    // place the words on the interview clip's timeline item so the edit has something to cut
+    for x in &mut w {
+        x.clip = ClipId(1);
+    }
+    let r = find_retakes(&w, &RetakeRules::default());
+    let hits: Vec<_> = r.iter().map(|x| x.cut.clone()).collect();
+    let ranges = filler_ranges(&w, &hits, R);
+    assert_eq!(ranges.len(), 1);
+    // from the first word to the restart, snapped to frames, never into the restart word
+    assert_eq!(ranges[0].start, s(0.0));
+    assert!(ranges[0].end() <= w[4].start && ranges[0].end() >= w[3].start);
+}

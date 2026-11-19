@@ -288,6 +288,100 @@ pub fn filler_ranges(words: &[SeqWord], hits: &[std::ops::Range<usize>], rate: F
     out
 }
 
+/// Rules for finding retakes (a speaker stopping and starting the same line again).
+#[derive(Clone, Debug, PartialEq)]
+pub struct RetakeRules {
+    /// Leading words the restart must repeat word for word (fillers skipped) before it counts.
+    pub min_words: usize,
+    /// Share of the earlier attempt's words the restart repeats, in order (0..=1). 1.0 keeps only
+    /// pure false starts; lower also catches a line said again with a word or two changed.
+    pub min_coverage: f64,
+    /// Longest time from the start of the earlier attempt to the start of the restart.
+    pub max_span: Tick,
+    /// Words skipped when comparing (the filler list).
+    pub fillers: Vec<String>,
+}
+
+impl Default for RetakeRules {
+    fn default() -> Self {
+        RetakeRules { min_words: 3, min_coverage: 0.8, max_span: Tick(15 * TICKS_PER_SECOND), fillers: DEFAULT_FILLERS.iter().map(|f| f.to_string()).collect() }
+    }
+}
+
+/// A retake: the earlier attempt `cut` (word indices, fillers inside it included) and the word
+/// `restart` where the kept attempt begins (`cut.end == restart`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Retake {
+    pub cut: std::ops::Range<usize>,
+    pub restart: usize,
+}
+
+/// Longest common subsequence length of two word lists.
+fn lcs(a: &[&str], b: &[&str]) -> usize {
+    let mut row = vec![0usize; b.len() + 1];
+    for x in a {
+        let mut diag = 0;
+        for (j, y) in b.iter().enumerate() {
+            let up = row[j + 1];
+            row[j + 1] = if x == y { diag + 1 } else { up.max(row[j]) };
+            diag = up;
+        }
+    }
+    row[b.len()]
+}
+
+/// Retakes, earliest first, never overlapping. An attempt is a retake when a later run of words —
+/// same speaker, media item and track, starting within `max_span` — opens with the same
+/// `min_words` words (fillers skipped) and repeats at least `min_coverage` of the attempt in order.
+/// The last attempt is always the one kept: "I went to the, I went to the, I went to the store"
+/// gives two retakes.
+pub fn find_retakes(words: &[SeqWord], rules: &RetakeRules) -> Vec<Retake> {
+    let min = rules.min_words.max(1);
+    let mut filler = vec![false; words.len()];
+    for h in find_fillers(words, &rules.fillers) {
+        for k in h {
+            filler[k] = true;
+        }
+    }
+    // content words (indices into `words`), compared by their normalized text
+    let norm: Vec<String> = words.iter().map(SeqWord::normalized).collect();
+    let c: Vec<usize> = (0..words.len()).filter(|&k| !filler[k] && !norm[k].is_empty()).collect();
+    let same_voice = |a: usize, b: usize| words[a].speaker == words[b].speaker && words[a].item == words[b].item && words[a].track == words[b].track;
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < c.len() {
+        let mut found = None;
+        for j in i + 1..c.len() {
+            let (wi, wj) = (c[i], c[j]);
+            if words[wj].start - words[wi].start > rules.max_span {
+                break;
+            }
+            if !same_voice(wi, wj) {
+                continue;
+            }
+            // the restart repeats the attempt's opening words (counted inside the attempt only)
+            let lead = (0..).take_while(|&k| i + k < j && j + k < c.len() && norm[c[i + k]] == norm[c[j + k]]).count();
+            if lead < min || (i..j).any(|k| !same_voice(c[k], wi)) {
+                continue;
+            }
+            let attempt: Vec<&str> = c[i..j].iter().map(|&k| norm[k].as_str()).collect();
+            let again: Vec<&str> = c[j..c.len().min(j + attempt.len() + 2)].iter().map(|&k| norm[k].as_str()).collect();
+            if lcs(&attempt, &again) as f64 >= rules.min_coverage * attempt.len() as f64 {
+                found = Some(j);
+                break;
+            }
+        }
+        match found {
+            Some(j) => {
+                out.push(Retake { cut: c[i]..c[j], restart: c[j] });
+                i = j;
+            }
+            None => i += 1,
+        }
+    }
+    out
+}
+
 /// Sort and merge ranges (overlapping or touching).
 pub fn merge_ranges(mut r: Vec<TimeRange>) -> Vec<TimeRange> {
     r.sort_by_key(|x| x.start);
