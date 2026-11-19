@@ -20,7 +20,10 @@ pub use grade::GradeSpace;
 pub use log::LogCurve;
 pub use lut::{Lut, Lut1d, Lut3d, LutFormat};
 pub use spaces::{ColorPipeline, ColorSpace, Curve, Gamut, WorkingSpace};
-pub use transform::{DecodeTable, GPU_LOG_KNOTS, GpuCurve, GpuInputParams, GpuLog, InputTransform, OutputTransform, REFERENCE_WHITE_NITS, ToneMap};
+pub use transform::{
+    DecodeTable, GPU_LOG_KNOTS, GpuCurve, GpuInputParams, GpuLog, InputTransform, LOG_PEAK_NITS, OutputTransform, REFERENCE_WHITE_NITS, ToneMap,
+    scene_tone_peak_nits, shared_tone_map, tone_map_peak_nits,
+};
 
 /// YUV ↔ RGB matrix coefficients.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]

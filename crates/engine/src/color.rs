@@ -53,6 +53,8 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             r#"{"folder":str?,"names":[str]?,"width":n=160,"columns":n=4,"path":str?}"#,
             preset_thumbnails,
         ),
+        query("sceneGrade.presets", "List Scene Grade Presets", "{}", list_scene_presets),
+        spec("sceneGrade.applyPreset", "Apply Scene Grade Preset", &[], r#"{"name":str,"clips":[id]?}"#, has_seq, apply_scene_preset),
         query("media.colorInfo", "Media Colour Info", r#"{"item":id}"#, color_info),
         spec("lut.import", "Import LUT…", &[], r#"{"path":str,"name":str?}"#, always, import),
         query("lut.list", "List LUTs", "{}", list),
@@ -458,6 +460,42 @@ fn apply_preset(s: &mut Session, p: &Value) -> Result<Value> {
         for t in q.video_tracks.iter_mut() {
             for it in t.items.iter_mut().filter(|i| clips.contains(&i.id)) {
                 it.effects.push(inst.clone());
+                n += 1;
+            }
+        }
+        Ok(n)
+    })?;
+    if n == 0 {
+        return Err(bad(cmd, "no video clips among the clips"));
+    }
+    Ok(json!({"preset": preset.name, "clips": n}))
+}
+
+fn list_scene_presets(_: &mut Session, _: &Value) -> Result<Value> {
+    let v: Vec<Value> = filmcraft_render::scene_grade::presets().iter().map(|x| json!({"name": x.name, "description": x.description})).collect();
+    Ok(json!({"presets": v}))
+}
+
+/// Scene Grade presets: the preset's parameters on each video clip's Scene Grade, which a clip
+/// without one gets at the end of its stack, where it still runs first (the Source, Kelvin, Tint, exposure and gains already on it
+/// stay). One undo step.
+fn apply_scene_preset(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sceneGrade.applyPreset";
+    let name = str_p(p, "name").ok_or_else(|| bad(cmd, "need `name`"))?;
+    let preset = filmcraft_render::scene_grade::find_preset(name).ok_or_else(|| bad(cmd, format!("no Scene Grade preset `{name}`")))?;
+    let clips = crate::commands::clips_p(s, p);
+    if clips.is_empty() {
+        return Err(bad(cmd, "select clips first"));
+    }
+    let fresh = preset.instance().ok_or_else(|| bad(cmd, "Scene Grade is not available"))?;
+    let n = s.edit_sequence(&format!("Apply {}", preset.name), |q, _, _| {
+        let mut n = 0;
+        for t in q.video_tracks.iter_mut() {
+            for it in t.items.iter_mut().filter(|i| clips.contains(&i.id)) {
+                match it.effects.iter_mut().find(|e| e.effect == filmcraft_render::scene_grade::ID) {
+                    Some(existing) => preset.apply_to(existing),
+                    None => it.effects.push(fresh.clone()),
+                }
                 n += 1;
             }
         }

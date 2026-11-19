@@ -219,6 +219,9 @@ pub enum FxOp {
         aspect: f32,
         gpu_capable: bool,
     },
+    /// Scene Grade: grading on scene-linear colour with the highlight roll-off at its end
+    /// ([`crate::scene_grade`]).
+    SceneGrade(crate::scene_grade::SceneParams),
 }
 
 /// Effect ids [`FxOp::eval`] understands (the GPU-capable standard effects).
@@ -259,6 +262,7 @@ pub const GPU_EFFECTS: &[&str] = &[
     "vignette",
     "video_limiter",
     "lumetri",
+    "scene_grade",
 ];
 
 /// `Image::transformed` without the mip path: the destination rectangle it writes and the inverse.
@@ -659,6 +663,7 @@ impl FxOp {
                     gpu_capable,
                 }
             }
+            "scene_grade" => FxOp::SceneGrade(crate::scene_grade::eval(e, cx)),
             _ => return None,
         })
     }
@@ -714,6 +719,7 @@ impl FxOp {
                     && fin(ht)
                     && fin(&[*va, *vmid, *vround, *vfeather, *aspect])
             }
+            FxOp::SceneGrade(p) => p.is_finite(),
         }
     }
 
@@ -1123,6 +1129,7 @@ impl FxOp {
                     dec(v)
                 });
             }
+            FxOp::SceneGrade(p) => crate::effects::scene_grade(img, p),
         }
     }
 }
@@ -1236,6 +1243,7 @@ mod tests {
             env: None,
             frame_rate: 24.0,
             working: filmcraft_color::WorkingSpace::Rec709,
+            scene_peak_nits: None,
         };
         // Both sides of each cutoff, including samples inside the former artificial fade.
         let lo = 90.0 / 255.0;
@@ -1285,6 +1293,7 @@ mod tests {
             env: None,
             frame_rate: 24.0,
             working: filmcraft_color::WorkingSpace::Rec709,
+            scene_peak_nits: None,
         };
         let on_gpu = |e: &EffectInstance| FxOp::eval(e, &cx, 64, 36).is_some_and(|op| op.gpu_ok());
         let mut e = find_effect("transform").unwrap().instance();

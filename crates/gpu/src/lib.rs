@@ -1307,4 +1307,6 @@ mod blend_tests;
 #[cfg(test)]
 mod fx_tests;
 #[cfg(test)]
+mod scene_grade_tests;
+#[cfg(test)]
 mod tests;

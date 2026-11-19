@@ -55,6 +55,7 @@ const OP_BOKEH_BOOST: u32 = 33u;
 const OP_BOKEH: u32 = 34u;
 const OP_BOKEH_UP: u32 = 35u;
 const OP_THREE_WAY: u32 = 36u;
+const OP_SCENE_GRADE: u32 = 37u;
 
 fn size() -> vec2<i32> {
     return vec2<i32>(i32(u.i0.y), i32(u.i0.z));
@@ -394,6 +395,91 @@ fn limit_video(v: vec3<f32>, max_val: f32, comp: f32, axis: u32) -> vec3<f32> {
     return clamp(out_rgb, vec3(0.0), vec3(max_val));
 }
 
+// ---- Scene Grade (`scene_grade::grade_pixel`): grading on scene-linear colour, ending in the BT.2390
+// roll-off the clip's input transform left out
+
+// SMPTE ST 2084 on a 0..1 scale (1 = 10 000 cd/m²) and back (`pq_eotf` / `pq_inverse_eotf`).
+fn pq1(e: f32) -> f32 {
+    let m1 = 0.1593017578125; let m2 = 78.84375; let c1 = 0.8359375; let c2 = 18.8515625; let c3 = 18.6875;
+    let p = powf(max(e, 0.0), 1.0 / m2);
+    return powf(max(p - c1, 0.0) / (c2 - c3 * p), 1.0 / m1);
+}
+fn pq1_inv(y: f32) -> f32 {
+    let m1 = 0.1593017578125; let m2 = 78.84375; let c1 = 0.8359375; let c2 = 18.8515625; let c3 = 18.6875;
+    let p = powf(clamp(y, 0.0, 1.0), m1);
+    return powf((c1 + c2 * p) / (1.0 + c3 * p), m2);
+}
+
+// ITU-R BT.2390 EETF (`bt2390_eetf`), source peak s to target peak d, in cd/m².
+fn eetf(nits: f32, s: f32, d: f32) -> f32 {
+    if d >= s || nits <= 0.0 { return clamp(nits, 0.0, max(s, d)); }
+    let smax = pq1_inv(s / 10000.0);
+    let e1 = min(pq1_inv(nits / 10000.0) / smax, 1.0);
+    let max_lum = pq1_inv(d / 10000.0) / smax;
+    let ks = 1.5 * max_lum - 0.5;
+    var e2 = e1;
+    if e1 >= ks {
+        let t = (e1 - ks) / (1.0 - ks);
+        let t2 = t * t; let t3 = t2 * t;
+        e2 = (2.0 * t3 - 3.0 * t2 + 1.0) * ks + (t3 - 2.0 * t2 + t) * (1.0 - ks) + (-2.0 * t3 + 3.0 * t2) * max_lum;
+    }
+    return pq1(e2 * smax) * 10000.0;
+}
+
+fn scene_grade_op(c0: vec3<f32>) -> vec3<f32> {
+    // white balance, exposure and gains: one 3x3 (p0..p2.x, row-major)
+    var c = vec3(
+        dot(vec3(u.p0.x, u.p0.y, u.p0.z), c0),
+        dot(vec3(u.p0.w, u.p1.x, u.p1.y), c0),
+        dot(vec3(u.p1.z, u.p1.w, u.p2.x), c0),
+    );
+    if u.i1.y != 0u {
+        let contrast = u.p2.y;
+        let pivot = u.p2.z;
+        let y = max(luma709(c), 1e-6);
+        let s = log2(y / 0.18);
+        var s2 = pivot + (s - pivot) * contrast;
+        // three raised-cosine zones: (centre, width, exposure) in stops
+        let zc = vec3(u.p2.w, u.p3.z, u.p4.y);
+        let zw = vec3(u.p3.x, u.p3.w, u.p4.z);
+        let ze = vec3(u.p3.y, u.p4.x, u.p4.w);
+        for (var i = 0; i < 3; i++) {
+            if ze[i] != 0.0 {
+                let t = clamp((s - zc[i]) / zw[i], -1.0, 1.0);
+                s2 += ze[i] * 0.5 * (1.0 + cos(3.14159265358979 * t));
+            }
+        }
+        c = c * (0.18 * exp2(clamp(s2, -40.0, 40.0)) / y);
+    }
+    let before = max(max(c.x, c.y), c.z);
+    var out = c;
+    let tone = u.i1.x != 0u;
+    if tone {
+        // `ToneMap::apply`: BT.2390 on max(R,G,B) as a ratio, clipping above the source peak
+        let white_nits = 203.0;
+        if before > 0.0 {
+            let nits = before * white_nits;
+            var k = 1.0;
+            if nits >= u.p5.z {
+                k = 1.0 / before;
+            } else if nits > 1e-6 {
+                k = eetf(nits, u.p5.z, white_nits) / nits;
+            }
+            out = c * k;
+        }
+    }
+    // how hard the shoulder pressed this pixel, on the roll-off alone (before the white level)
+    let press = clamp(1.0 - max(max(out.x, out.y), out.z) / max(before, 1e-9), 0.0, 1.0);
+    out = out * u.p5.x;
+    // path to white: the press pulls the pixel towards its own luma
+    let desat = u.p5.y;
+    if desat > 0.0 && tone {
+        let yo = luma709(out);
+        out = out + (vec3(yo) - out) * (desat * press);
+    }
+    return out;
+}
+
 // ---- per-pixel colour effects on straight colour (`Image::map_rgb`)
 
 fn color_op(op: u32, c: vec3<f32>) -> vec3<f32> {
@@ -431,6 +517,9 @@ fn color_op(op: u32, c: vec3<f32>) -> vec3<f32> {
                 o = o + (l - l2);
             }
             return dec(o);
+        }
+        case OP_SCENE_GRADE: {
+            return scene_grade_op(c);
         }
         case OP_THREE_WAY: {
             if u.i1.x != 0u {

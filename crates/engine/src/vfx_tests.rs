@@ -65,9 +65,15 @@ fn effects_list_reports_folders_and_badges() {
     assert_eq!(find("crop")["category"], json!(["Legacy", "Video Effects"]));
     assert_eq!(find("luma_key")["badges"], json!({"accelerated": true, "float32": true, "yuv": true}));
     assert_eq!(find("lens_flare")["folder"], "Lights & Glows");
-    let n =
-        arr.iter().filter(|e| e["kind"] == "Video" && e["category"][0] == "Video Effects" && e["folder"] != "Obsolete" && e["folder"] != Value::Null).count();
+    // (DSPV Cut adds Scene Grade to Color Correction: not one of Premiere's)
+    let n = arr
+        .iter()
+        .filter(|e| {
+            e["kind"] == "Video" && e["category"][0] == "Video Effects" && e["folder"] != "Obsolete" && e["folder"] != Value::Null && e["id"] != "scene_grade"
+        })
+        .count();
     assert_eq!(n, 93, "Premiere 26's current Video Effects");
+    assert_eq!(find("scene_grade")["category"], json!(["Video Effects", "Color Correction"]));
 }
 
 #[test]
@@ -129,6 +135,68 @@ fn effects_apply_reports_where_each_instance_landed() {
     let (track, item) = s.active_sequence().unwrap().find_item(filmcraft_project::ClipId(target)).unwrap();
     assert_eq!(s.active_sequence().unwrap().track(track).unwrap().kind, filmcraft_project::TrackKind::Audio);
     assert_eq!(item.effects.get(a["index"].as_u64().unwrap() as usize).map(|e| e.effect.as_str()), Some("parametric_eq"));
+}
+
+/// Scene Grade is appended like any effect, so the indices of the effects already on the clip stay
+/// valid (#1879; the renderer runs it first wherever it sits), a clip has one, and its parameters
+/// (the Source choice by name) take the usual commands.
+#[test]
+fn scene_grade_is_appended_and_a_clip_has_one() {
+    let mut s = demo();
+    let clip = first_v1_clip(&s);
+    let blur = s.execute("effects.apply", json!({"clips": [clip], "effect": "gaussian_blur"})).unwrap()["applied"][0]["index"].as_u64();
+    let before = s.project.to_json();
+    let r = s.execute("effects.apply", json!({"clips": [clip], "effect": "Scene Grade"})).unwrap();
+    assert_eq!(r["applied"][0]["effect"], "scene_grade");
+    let effects = |s: &Session| s.active_sequence().unwrap().find_item(filmcraft_project::ClipId(clip)).unwrap().1.effects.clone();
+    let at = r["applied"][0]["index"].as_u64().map(|i| i as usize);
+    assert_eq!(at, Some(effects(&s).len() - 1), "appended");
+    assert_eq!(effects(&s)[effects(&s).len() - 1].effect, "scene_grade");
+    // the blur keeps the index it was handed
+    assert_eq!(blur.map(|i| effects(&s)[i as usize].effect.clone()).as_deref(), Some("gaussian_blur"));
+    // a second one is refused and leaves the project alone
+    let after = s.project.to_json();
+    assert!(s.execute("effects.apply", json!({"clips": [clip], "effect": "scene_grade"})).is_err());
+    assert_eq!(s.project.to_json(), after);
+    // parameters: the Source choice by its name, a keyframed Kelvin
+    s.execute("effects.setParam", json!({"clip": clip, "effect": "scene_grade", "param": "source", "value": "N-Log"})).unwrap();
+    s.execute("effects.setParam", json!({"clip": clip, "effect": "scene_grade", "param": "kelvin", "value": 3200.0})).unwrap();
+    s.execute("effects.setParam", json!({"clip": clip, "effect": "scene_grade", "param": "highlight_exposure", "value": -1.0, "keyframe": true})).unwrap();
+    let sg = |s: &Session| effects(s).into_iter().find(|e| e.effect == "scene_grade").unwrap();
+    assert_eq!(sg(&s).params["source"].value, filmcraft_project::ParamValue::Choice(1));
+    assert!(sg(&s).params["highlight_exposure"].is_animated());
+    // undoable
+    for _ in 0..4 {
+        s.execute("edit.undo", json!({})).unwrap();
+    }
+    assert_eq!(s.project.to_json(), before);
+}
+
+#[test]
+fn the_scene_grade_preset_goes_on_the_clips_scene_grade() {
+    let mut s = demo();
+    let clip = first_v1_clip(&s);
+    let listed = s.execute("sceneGrade.presets", json!({})).unwrap();
+    assert_eq!(listed["presets"][0]["name"], "DSPV interior");
+    let before = s.project.to_json();
+    assert!(s.execute("sceneGrade.applyPreset", json!({"name": "nope", "clips": [clip]})).is_err());
+    assert_eq!(s.project.to_json(), before);
+    let effects = |s: &Session| s.active_sequence().unwrap().find_item(filmcraft_project::ClipId(clip)).unwrap().1.effects.clone();
+    let sg = |s: &Session| effects(s).into_iter().find(|e| e.effect == "scene_grade").unwrap();
+    // a clip without a Scene Grade gets one, at the end of its stack
+    let n = effects(&s).len();
+    s.execute("sceneGrade.applyPreset", json!({"name": "dspv interior", "clips": [clip]})).unwrap();
+    assert_eq!(effects(&s).len(), n + 1);
+    assert_eq!(effects(&s)[n].effect, "scene_grade");
+    assert_eq!(sg(&s).params["contrast"].value, filmcraft_project::ParamValue::Float(1.45));
+    // one that has its own white balance keeps it
+    s.execute("effects.setParam", json!({"clip": clip, "effect": "scene_grade", "param": "kelvin", "value": 3100.0})).unwrap();
+    s.execute("effects.setParam", json!({"clip": clip, "effect": "scene_grade", "param": "contrast", "value": 1.0})).unwrap();
+    s.execute("sceneGrade.applyPreset", json!({"name": "DSPV interior", "clips": [clip]})).unwrap();
+    let e = &sg(&s);
+    assert_eq!(e.params["kelvin"].value, filmcraft_project::ParamValue::Float(3100.0));
+    assert_eq!(e.params["contrast"].value, filmcraft_project::ParamValue::Float(1.45));
+    assert_eq!(effects(&s).iter().filter(|e| e.effect == "scene_grade").count(), 1);
 }
 
 #[test]

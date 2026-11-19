@@ -30,6 +30,7 @@ pub mod plan;
 pub mod preview;
 pub mod remix;
 pub mod scene;
+pub mod scene_grade;
 pub mod track;
 pub mod transitions;
 pub mod vfx;
@@ -351,6 +352,7 @@ fn adjustment_layer(project: &Project, seq: &Sequence, item: &TrackItem, t: Tick
         env: None,
         frame_rate: seq.settings.frame_rate.as_f64(),
         working: seq.settings.color.working,
+        scene_peak_nits: None,
     };
     for e in item.effects.iter().filter(|e| e.def().is_some_and(|d| !d.intrinsic)) {
         mask::apply_effect(&mut adj, e, &cx);
@@ -569,9 +571,9 @@ pub(crate) fn item_layer_ex(
         // anything else takes the general path below, with the frame already fetched
         fetched = Some((src, frame, n));
     }
-    let mut layer = match fetched {
-        Some((src, frame, n)) => media_image(project, seq, item, t, MediaFrame { src: &src, frame: &frame, n }, want),
-        None => base_layer(project, seq, item, t, opts, sources, want)?,
+    let (mut layer, scene_peak_nits) = match fetched {
+        Some((src, frame, n)) => media_image(project, seq, item, t, MediaFrame { src: &src, frame: &frame, n, effects: opts.effects }, want),
+        None => base_layer_scene(project, seq, item, t, opts, sources, want)?,
     };
     let px_scale = layer.w as f32 / src_size.0.max(1) as f32;
     // layer px → source px → sequence px → output px
@@ -588,12 +590,15 @@ pub(crate) fn item_layer_ex(
             env: Some(&env),
             frame_rate: seq.settings.frame_rate.as_f64(),
             working: seq.settings.color.working,
+            scene_peak_nits,
         };
-        for e in item.effects.iter().filter(|e| e.def().is_some_and(|d| !d.intrinsic) && !filmcraft_project::graphic::is_layer(e)) {
+        // the clip's Scene Grade runs first and alone rolls the highlights off ([`scene_grade`])
+        let grade = scene_grade::active(item);
+        for e in scene_grade::render_order(item) {
             if filmcraft_media::cancel::cancelled() {
                 return None;
             }
-            mask::apply_effect(&mut layer, e, &cx);
+            mask::apply_effect(&mut layer, e, &scene_grade::ctx_for(&cx, e, grade));
         }
     }
     mask::apply_opacity_masks(&mut layer, item, mt, px_scale);
@@ -656,28 +661,39 @@ struct MediaFrame<'a> {
     src: &'a SharedSource,
     frame: &'a VideoFrame,
     n: usize,
+    /// Whether the render shows effects: a clip's Scene Grade only takes part in its colour
+    /// management then ([`colorman::clip_color`]).
+    effects: bool,
 }
 
 /// The linear image of a media clip's `frame`, colour managed, and blended (or, with Optical Flow,
 /// motion interpolated) with the next frame when the clip's speed asks for it.
-fn media_image(project: &Project, seq: &Sequence, item: &TrackItem, t: Tick, mf: MediaFrame<'_>, want: f32) -> Image {
-    let MediaFrame { src, frame, n } = mf;
-    let img = colorman::decode(project, item.item, frame, n, &seq.settings.color);
-    match media_interpolation(item, t, src, seq.settings.frame_rate) {
+///
+/// Also the source peak of the tone map the clip's input transform left to its Scene Grade
+/// (`FxCtx::scene_peak_nits`).
+fn media_image(project: &Project, seq: &Sequence, item: &TrackItem, t: Tick, mf: MediaFrame<'_>, want: f32) -> (Image, Option<f32>) {
+    let MediaFrame { src, frame, n, effects } = mf;
+    let pipe = &seq.settings.color;
+    let cc = colorman::clip_color(project, item, frame, pipe, effects);
+    let img = colorman::decode_clip(project, item.item, frame, n, pipe, cc);
+    let img = match media_interpolation(item, t, src, seq.settings.frame_rate) {
         Some((next_time, wgt)) => match src.video_frame(FrameRequest { time: next_time, scale: want }) {
             Ok(f2) if f2.width == frame.width && f2.height == frame.height => {
-                let b = colorman::decode(project, item.item, &f2, n, &seq.settings.color);
+                let b = colorman::decode_clip(project, item.item, &f2, n, pipe, cc);
                 if item.time_interpolation == filmcraft_project::TimeInterpolation::OpticalFlow { flow::interpolate(&img, &b, wgt) } else { img.lerp(&b, wgt) }
             }
             _ => img,
         },
         None => img,
-    }
+    };
+    (img, cc.deferred_tone_peak_nits)
 }
 
 /// A track item's picture at timeline `t` before any effect (decoded, colour managed, frame
-/// blended; nested sequences rendered; graphics rasterised), at `want` of its source size.
-pub(crate) fn base_layer(
+/// blended; nested sequences rendered; graphics rasterised), at `want` of its source size, and the
+/// source peak of the tone map its colour management left to the clip's Scene Grade
+/// (`FxCtx::scene_peak_nits`), which the clip's effects must apply.
+pub(crate) fn base_layer_scene(
     project: &Project,
     seq: &Sequence,
     item: &TrackItem,
@@ -685,7 +701,7 @@ pub(crate) fn base_layer(
     opts: RenderOptions,
     sources: &dyn SourceProvider,
     want: f32,
-) -> Option<Image> {
+) -> Option<(Image, Option<f32>)> {
     // `ft`: the media time of the frame shown
     let ft = item.source_time_at(t);
     let mt = item.effect_time_at(t);
@@ -694,7 +710,7 @@ pub(crate) fn base_layer(
     Some(match &pi.kind {
         ItemKind::Media(_) | ItemKind::Subclip { .. } => {
             let (src, frame, n) = media_frame(item, t, sources, want, src_size)?;
-            media_image(project, seq, item, t, MediaFrame { src: &src, frame: &frame, n }, want)
+            return Some(media_image(project, seq, item, t, MediaFrame { src: &src, frame: &frame, n, effects: opts.effects }, want));
         }
         ItemKind::Sequence(nested) => {
             let sub = RenderOptions { scale: want, effects: opts.effects, depth: opts.depth + 1, captions: false, working_output: true };
@@ -721,6 +737,7 @@ pub(crate) fn base_layer(
             img
         }
     })
+    .map(|img| (img, None))
 }
 
 /// The layer of one clip at timeline `t` with its effects applied, on a canvas the size of the
