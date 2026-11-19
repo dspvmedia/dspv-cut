@@ -477,7 +477,7 @@ fn list_scene_presets(_: &mut Session, _: &Value) -> Result<Value> {
 }
 
 /// Scene Grade presets: the preset's parameters on each video clip's Scene Grade, which a clip
-/// without one gets first in its stack (the Source, Kelvin, Tint, exposure and gains already on it
+/// without one gets at the end of its stack, where it still runs first (the Source, Kelvin, Tint, exposure and gains already on it
 /// stay). One undo step.
 fn apply_scene_preset(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sceneGrade.applyPreset";
@@ -494,7 +494,7 @@ fn apply_scene_preset(s: &mut Session, p: &Value) -> Result<Value> {
             for it in t.items.iter_mut().filter(|i| clips.contains(&i.id)) {
                 match it.effects.iter_mut().find(|e| e.effect == filmcraft_render::scene_grade::ID) {
                     Some(existing) => preset.apply_to(existing),
-                    None => it.effects.insert(0, fresh.clone()),
+                    None => it.effects.push(fresh.clone()),
                 }
                 n += 1;
             }
