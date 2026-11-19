@@ -320,3 +320,32 @@ fn color_info_says_which_values_no_tag_gave() {
     let item = s.active_sequence().unwrap().find_item(clip).unwrap().1.item;
     assert_eq!(s.execute("media.colorInfo", json!({"item": item.0})).unwrap()["assumed"], serde_json::Value::Null);
 }
+
+/// HSL Secondary ▸ Exposure / Contrast: set through the control API on an instance saved before
+/// they existed, then through save and open.
+#[test]
+fn hsl_exposure_and_contrast_set_and_round_trip_through_a_saved_project() {
+    let mut s = demo();
+    let clip = pick_clip(&mut s);
+    s.execute("effects.apply", json!({"clips": [clip.0], "effect": "lumetri"})).unwrap();
+    s.edit_sequence("strip", |q, _, _| {
+        let (_, it) = q.find_item_mut(clip).unwrap();
+        let e = it.effects.iter_mut().find(|e| e.effect == "lumetri").unwrap();
+        e.params.remove("hsl_exposure");
+        e.params.remove("hsl_contrast");
+        Ok(())
+    })
+    .unwrap();
+    for (p, v) in [("hsl_on", json!(true)), ("hsl_exposure", json!(0.8)), ("hsl_contrast", json!(-25.0))] {
+        s.execute("effects.setParam", json!({"clip": clip.0, "effect": "lumetri", "param": p, "value": v})).unwrap();
+    }
+    let path = tmp("hsl-exposure.fcproj");
+    s.execute("file.saveAs", json!({"path": path})).unwrap();
+    let mut t = Session::default();
+    t.execute("file.open", json!({"path": path})).unwrap();
+    let q = t.active_sequence().unwrap();
+    let e = q.find_item(clip).unwrap().1.effects.iter().find(|e| e.effect == "lumetri").unwrap();
+    assert!((e.f64_at("hsl_exposure", filmcraft_time::Tick::ZERO) - 0.8).abs() < 1e-9);
+    assert!((e.f64_at("hsl_contrast", filmcraft_time::Tick::ZERO) + 25.0).abs() < 1e-9);
+    let _ = std::fs::remove_file(&path);
+}

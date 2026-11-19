@@ -1479,6 +1479,14 @@ fn hsl_secondary(img: &mut Image, e: &EffectInstance, cx: &FxCtx) {
     let show_mask = choice(e, "hsl_show_mask");
     let (htemp, htint, hsat, hshift) =
         (f(e, "hsl_temp", cx) / 100.0, f(e, "hsl_tint", cx) / 100.0, f(e, "hsl_sat", cx) / 100.0, f(e, "hsl_hue_shift", cx) / 360.0);
+    // Exposure scales the keyed display value by 2^(e/2.4): about e stops of light through a 2.4
+    // display gamma, and hue-keeping because every channel gets the same gain. Contrast is the
+    // Basic Correction S-curve on the luma, applied as a hue-keeping scale. Both are skipped at
+    // 0, so grades saved before they existed render bit-identical.
+    let hexp = f(e, "hsl_exposure", cx);
+    let hgain = if hexp.abs() > 1e-4 { Some(2f32.powf(hexp / 2.4)) } else { None };
+    let hcon = f(e, "hsl_contrast", cx) / 100.0;
+    let hcon = (hcon.abs() > 1e-4).then_some(1.0 + hcon);
     let (denoise, blur) = (f(e, "hsl_denoise", cx).clamp(0.0, 100.0) / 100.0, f(e, "hsl_blur", cx).clamp(0.0, 100.0) / 100.0);
     let (w, h) = (img.w, img.h);
     let unit = |c: [f32; 3]| {
@@ -1528,6 +1536,19 @@ fn hsl_secondary(img: &mut Image, e: &EffectInstance, cx: &FxCtx) {
                 c2[0] *= 1.0 + 0.25 * htemp;
                 c2[2] *= 1.0 - 0.25 * htemp;
                 c2[1] *= 1.0 - 0.2 * htint;
+                if let Some(g) = hgain {
+                    c2 = c2.map(|q| q * g);
+                }
+                if let Some(k) = hcon {
+                    let l = 0.2126 * c2[0] + 0.7152 * c2[1] + 0.0722 * c2[2];
+                    let q = l.clamp(0.0, 1.0);
+                    let s = q * q * (3.0 - 2.0 * q);
+                    let nl = if k >= 1.0 { q + (s - q) * (k - 1.0) } else { 0.5 + (q - 0.5) * k };
+                    // above white (a lifted highlight) the curve has nothing to say: keep it
+                    let nl = if l > 1.0 { l } else { nl.max(0.0) };
+                    let (k, add) = lift_scale(l, nl);
+                    c2 = c2.map(|q| q * k + add);
+                }
                 [u[0] + (c2[0] - u[0]) * m, u[1] + (c2[1] - u[1]) * m, u[2] + (c2[2] - u[2]) * m]
             }
         };

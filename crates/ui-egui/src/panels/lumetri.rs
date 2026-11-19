@@ -224,6 +224,8 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
             slider(ui, &e, mt, "hsl_tint", tl!("Tint"), Some(Gradient::Tint), &t, &mut actions, clip, idx);
             slider(ui, &e, mt, "hsl_sat", tl!("Saturation"), None, &t, &mut actions, clip, idx);
             slider(ui, &e, mt, "hsl_hue_shift", tl!("Hue Shift"), Some(Gradient::Hue), &t, &mut actions, clip, idx);
+            slider(ui, &e, mt, "hsl_exposure", tl!("Exposure"), None, &t, &mut actions, clip, idx);
+            slider(ui, &e, mt, "hsl_contrast", tl!("Contrast"), None, &t, &mut actions, clip, idx);
         }
         if open_section(ui, app, &e, "Vignette", "vignette_on", "vignette", &mut sections) {
             for (id, label) in [
