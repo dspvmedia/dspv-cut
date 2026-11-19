@@ -411,12 +411,14 @@ fn remove_retakes(s: &mut Session, p: &Value) -> Result<Value> {
     let words = sequence_words(s);
     let d = tx::RetakeRules::default();
     let min_coverage = f64_p(p, "minCoverage").unwrap_or(d.min_coverage);
-    if !(0.0..=1.0).contains(&min_coverage) {
-        return Err(bad("transcript.removeRetakes", "minCoverage must be between 0 and 1"));
+    let min_coverage_sentence = f64_p(p, "minCoverageSentence").unwrap_or(d.min_coverage_sentence);
+    if !(0.0..=1.0).contains(&min_coverage) || !(0.0..=1.0).contains(&min_coverage_sentence) {
+        return Err(bad("transcript.removeRetakes", "minCoverage and minCoverageSentence must be between 0 and 1"));
     }
     let rules = tx::RetakeRules {
         min_words: u64_p(p, "minWords").map_or(d.min_words, |n| n.max(1) as usize),
         min_coverage,
+        min_coverage_sentence,
         max_span: f64_p(p, "maxSeconds").map_or(d.max_span, Tick::from_seconds_f64),
         fillers: match p.get("fillers").and_then(Value::as_array) {
             Some(a) => a.iter().filter_map(Value::as_str).map(str::to_string).collect(),
@@ -550,7 +552,7 @@ pub fn commands() -> Vec<CommandSpec> {
             "transcript.removeRetakes",
             "Remove Retakes",
             &["Sequence", "Transcript"],
-            r#"{"minWords":n?,"minCoverage":f?,"maxSeconds":f?,"fillers":[str]?,"dryRun":bool?}"#,
+            r#"{"minWords":n?,"minCoverage":f?,"minCoverageSentence":f?,"maxSeconds":f?,"fillers":[str]?,"dryRun":bool?}"#,
             has_transcript,
             remove_retakes,
             true,

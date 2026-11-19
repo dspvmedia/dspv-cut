@@ -391,13 +391,45 @@ fn a_false_start_is_cut_and_the_last_attempt_kept() {
 }
 
 #[test]
-fn a_line_said_again_with_one_word_changed_is_a_retake() {
+fn a_finished_sentence_goes_only_when_said_again_nearly_word_for_word() {
+    let d = RetakeRules::default();
+    // the same sentence again: cut
+    let w = line("Welcome to this home in Irvine. Welcome to this home in Irvine.");
+    assert_eq!(cut_text(&w, &find_retakes(&w, &d)), vec!["Welcome to this home in Irvine."]);
+    // one word in seven changed (6/7 < 0.9): a finished sentence stays by default...
     let w = line("Welcome to this beautiful home in Irvine. Welcome to this stunning home in Irvine.");
-    let r = find_retakes(&w, &RetakeRules::default());
-    assert_eq!(cut_text(&w, &r), vec!["Welcome to this beautiful home in Irvine."]);
-    // strict rules keep it
-    let strict = RetakeRules { min_coverage: 1.0, ..Default::default() };
+    assert!(find_retakes(&w, &d).is_empty());
+    // ...and goes with a looser sentence bar
+    let loose = RetakeRules { min_coverage_sentence: 0.8, ..Default::default() };
+    assert_eq!(cut_text(&w, &find_retakes(&w, &loose)), vec!["Welcome to this beautiful home in Irvine."]);
+    // the same change on an unfinished attempt uses the plain bar (0.8) and is cut
+    let w = line("Welcome to this beautiful home in, welcome to this stunning home in Irvine.");
+    assert_eq!(cut_text(&w, &find_retakes(&w, &d)), vec!["Welcome to this beautiful home in,"]);
+    // pure false starts only
+    let strict = RetakeRules { min_coverage: 1.0, min_coverage_sentence: 1.0, ..Default::default() };
     assert!(find_retakes(&w, &strict).is_empty());
+}
+
+#[test]
+fn whisper_output_of_the_test_clip() {
+    // word for word what whisper-base wrote for the generated retake clip (2026-11-19)
+    let w = line(
+        "Welcome to this home in Irvine. This kitchen has a... um... this kitchen has a big island and new counters. \
+         It is close to schools. It is close to the park too. The backyard was. The backyard was redone last spring.",
+    );
+    let r = find_retakes(&w, &RetakeRules::default());
+    // the trailing-off attempt and the cut-off "was." go; the deliberate repeated opening stays
+    assert_eq!(cut_text(&w, &r), vec!["This kitchen has a... um...", "The backyard was."]);
+}
+
+#[test]
+fn sentence_ends() {
+    for t in ["schools.", "really?", "Wow!", "done.\"", "(here.)", "it.”"] {
+        assert!(ends_sentence(t), "{t}");
+    }
+    for t in ["a...", "a…", "was,", "the", "um", ""] {
+        assert!(!ends_sentence(t), "{t}");
+    }
 }
 
 #[test]

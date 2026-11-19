@@ -293,9 +293,13 @@ pub fn filler_ranges(words: &[SeqWord], hits: &[std::ops::Range<usize>], rate: F
 pub struct RetakeRules {
     /// Leading words the restart must repeat word for word (fillers skipped) before it counts.
     pub min_words: usize,
-    /// Share of the earlier attempt's words the restart repeats, in order (0..=1). 1.0 keeps only
-    /// pure false starts; lower also catches a line said again with a word or two changed.
+    /// Share of an unfinished attempt's words the restart repeats, in order (0..=1). 1.0 keeps
+    /// only pure false starts; lower also catches a line said again with a word or two changed.
     pub min_coverage: f64,
+    /// The same share for an attempt that ends a sentence (`.`, `!` or `?`, not `...`). Set higher
+    /// than `min_coverage`: two finished sentences that share an opening ("It's close to schools.
+    /// It's close to the park.") are usually meant, so they go only when said again nearly word for word.
+    pub min_coverage_sentence: f64,
     /// Longest time from the start of the earlier attempt to the start of the restart.
     pub max_span: Tick,
     /// Words skipped when comparing (the filler list).
@@ -304,8 +308,21 @@ pub struct RetakeRules {
 
 impl Default for RetakeRules {
     fn default() -> Self {
-        RetakeRules { min_words: 3, min_coverage: 0.8, max_span: Tick(15 * TICKS_PER_SECOND), fillers: DEFAULT_FILLERS.iter().map(|f| f.to_string()).collect() }
+        RetakeRules {
+            min_words: 3,
+            min_coverage: 0.8,
+            min_coverage_sentence: 0.9,
+            max_span: Tick(15 * TICKS_PER_SECOND),
+            fillers: DEFAULT_FILLERS.iter().map(|f| f.to_string()).collect(),
+        }
     }
+}
+
+/// Whether a word ends a sentence: `.`, `!` or `?` last (closing quotes and brackets ignored),
+/// but not a trailing-off ellipsis (`...` or `…`).
+pub fn ends_sentence(text: &str) -> bool {
+    let t = text.trim_end_matches(['"', '\'', ')', ']', '”', '’']);
+    !(t.ends_with("..") || t.ends_with('…')) && t.ends_with(['.', '!', '?'])
 }
 
 /// A retake: the earlier attempt `cut` (word indices, fillers inside it included) and the word
@@ -332,7 +349,8 @@ fn lcs(a: &[&str], b: &[&str]) -> usize {
 
 /// Retakes, earliest first, never overlapping. An attempt is a retake when a later run of words —
 /// same speaker, media item and track, starting within `max_span` — opens with the same
-/// `min_words` words (fillers skipped) and repeats at least `min_coverage` of the attempt in order.
+/// `min_words` words (fillers skipped) and repeats at least `min_coverage` of the attempt in order
+/// (`min_coverage_sentence` when the attempt ends a sentence).
 /// The last attempt is always the one kept: "I went to the, I went to the, I went to the store"
 /// gives two retakes.
 pub fn find_retakes(words: &[SeqWord], rules: &RetakeRules) -> Vec<Retake> {
@@ -366,7 +384,8 @@ pub fn find_retakes(words: &[SeqWord], rules: &RetakeRules) -> Vec<Retake> {
             }
             let attempt: Vec<&str> = c[i..j].iter().map(|&k| norm[k].as_str()).collect();
             let again: Vec<&str> = c[j..c.len().min(j + attempt.len() + 2)].iter().map(|&k| norm[k].as_str()).collect();
-            if lcs(&attempt, &again) as f64 >= rules.min_coverage * attempt.len() as f64 {
+            let need = if ends_sentence(&words[c[j - 1]].text) { rules.min_coverage_sentence } else { rules.min_coverage };
+            if lcs(&attempt, &again) as f64 >= need * attempt.len() as f64 {
                 found = Some(j);
                 break;
             }
