@@ -73,12 +73,20 @@ fn settings() -> Vec<(Vec<(&'static str, f64)>, Option<f32>)> {
         (vec![], None),
         (vec![], Some(3000.0)),
         (interior.clone(), Some(3000.0)),
-        (interior, None),
+        (interior.clone(), None),
         (vec![("kelvin", 2200.0), ("tint", -60.0), ("gain_r", 1.3), ("gain_b", 0.6), ("exposure", 1.5), ("contrast", 0.6), ("pivot", 0.05)], Some(1500.0)),
         (vec![("kelvin", 14_000.0), ("tint", 90.0), ("contrast", 3.0), ("shadow_exposure", 5.0), ("highlight_exposure", 4.0), ("white", 1.2)], Some(4000.0)),
         (vec![("highlight_width", 0.0), ("highlight_exposure", 3.0), ("desat", 1.0), ("white", 0.5)], Some(3000.0)),
     ];
     v.push((vec![("exposure", -4.0), ("desat", 0.8), ("contrast", 2.0), ("dark_center", -6.0), ("dark_width", 0.3), ("dark_exposure", -5.0)], Some(203.5)));
+    // lens falloff: a correction under the interior look, a darkening off-centre falloff, and the extreme
+    // (centre at a corner, the highest power and amount) that runs into the gain's 40-stop clamp
+    let mut lens = interior;
+    lens.extend([("falloff_amount", 2.0), ("falloff_power", 2.0)]);
+    v.push((lens, Some(3000.0)));
+    v.push((vec![("falloff_amount", -2.0), ("falloff_power", 3.0), ("falloff_center_x", 10.0), ("falloff_center_y", -20.0)], None));
+    v.push((vec![("falloff_amount", 6.0), ("falloff_power", 8.0), ("falloff_center_x", 50.0), ("falloff_center_y", -50.0)], None));
+    v.push((vec![("falloff_amount", 6.0), ("falloff_power", 8.0), ("falloff_center_x", -50.0), ("falloff_center_y", 50.0), ("exposure", -3.0)], Some(3000.0)));
     v
 }
 

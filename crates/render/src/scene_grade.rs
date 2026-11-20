@@ -7,7 +7,8 @@
 //! applies the same tone map as its last step, after the grade:
 //!
 //! ```text
-//! white balance, exposure, gains (one 3×3, scene-linear)
+//! lens falloff correction (a radial gain by the pixel's place in the frame, see [`Falloff`])
+//!   → white balance, exposure, gains (one 3×3, scene-linear)
 //!   → contrast around a pivot and luminance zones, on log2 luminance, applied as a ratio Y'/Y
 //!   → tone map (BT.2390 on max(R,G,B), the roll-off the input transform skipped)
 //!   → white level → highlight desaturation ("path to white")
@@ -59,9 +60,50 @@ pub struct Zone {
     pub exposure: f32,
 }
 
+/// Lens falloff (vignetting) correction: a gain in scene light that grows with the distance from
+/// the optical centre, `2^(stops · r^power)`, where `r` is measured on the upright frame the effect
+/// sees (the source's rotation is applied where the file is read) over half its diagonal, so `r` is
+/// 1 at the corners of a centred falloff. It is fixed to the frame, like the lens's own falloff, and
+/// independent of the working image's resolution (proxies, decimation). A scalar per pixel, so it
+/// keeps hue and commutes with the white balance / exposure matrix it sits beside.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Falloff {
+    /// Stops of gain at radius 1 (the corners); 0 = off.
+    pub stops: f32,
+    /// Exponent of the radius: 2 is the usual near-quadratic falloff, higher keeps the centre flat.
+    pub power: f32,
+    /// The optical centre, offset from the frame's centre in fractions of its width and height.
+    pub center: [f32; 2],
+}
+
+impl Falloff {
+    /// No correction.
+    pub const OFF: Falloff = Falloff { stops: 0.0, power: 2.0, center: [0.0, 0.0] };
+
+    /// Whether it changes anything (off, the grade skips it and the picture is bit-identical).
+    pub fn active(&self) -> bool {
+        self.stops != 0.0
+    }
+
+    /// The gain at the centre of pixel (`x`, `y`) of a `w`×`h` working image. The WGSL op
+    /// (`scene_grade_gain`) computes the same, in the same order.
+    #[inline]
+    pub fn gain(&self, x: f32, y: f32, w: f32, h: f32) -> f32 {
+        let dx = x + 0.5 - (0.5 + self.center[0]) * w;
+        let dy = y + 0.5 - (0.5 + self.center[1]) * h;
+        let half_diagonal = (0.5 * (w * w + h * h).sqrt()).max(1e-6);
+        let r = (dx * dx + dy * dy).sqrt() / half_diagonal;
+        let shape = if r > 0.0 { r.powf(self.power) } else { 0.0 };
+        // (clamped: an off-centre falloff at a high power reaches r^power in the hundreds)
+        (self.stops * shape).clamp(-MAX_STOPS, MAX_STOPS).exp2()
+    }
+}
+
 /// An evaluated Scene Grade (see [`eval`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SceneParams {
+    /// Lens falloff correction, applied to the input before everything else.
+    pub falloff: Falloff,
     /// White balance, exposure and per-channel gains as one linear 3×3 (row-major).
     pub matrix: [[f32; 3]; 3],
     pub contrast: f32,
@@ -87,7 +129,9 @@ impl SceneParams {
 
     /// Every number finite (the GPU shader is only handed such an op).
     pub fn is_finite(&self) -> bool {
-        self.matrix.iter().flatten().all(|v| v.is_finite())
+        let f = &self.falloff;
+        [f.stops, f.power, f.center[0], f.center[1]].iter().all(|v| v.is_finite())
+            && self.matrix.iter().flatten().all(|v| v.is_finite())
             && self.zones.iter().all(|z| z.center.is_finite() && z.width.is_finite() && z.exposure.is_finite())
             && [self.contrast, self.pivot_stops, self.white, self.desat].iter().all(|v| v.is_finite())
             && self.tone_peak_nits.is_none_or(f32::is_finite)
@@ -128,7 +172,13 @@ pub fn eval(e: &EffectInstance, cx: &FxCtx) -> SceneParams {
             *v = (scale[r] * a[r][c]) as f32;
         }
     }
+    let falloff = Falloff {
+        stops: param(e, "falloff_amount", cx, (-8.0, 8.0), 0.0),
+        power: param(e, "falloff_power", cx, (0.25, 16.0), 2.0),
+        center: [param(e, "falloff_center_x", cx, (-100.0, 100.0), 0.0) / 100.0, param(e, "falloff_center_y", cx, (-100.0, 100.0), 0.0) / 100.0],
+    };
     SceneParams {
+        falloff,
         matrix,
         contrast,
         pivot_stops: (pivot / MID_GREY).log2(),
@@ -259,9 +309,28 @@ pub fn wb_matrix(kelvin: f64, tint: f64) -> Mat3 {
 
 // ---- the grade
 
-/// One pixel of the grade (straight, scene-linear working colour in, the graded colour out), with
-/// the tone map `tone` (when the clip's input transform left it to the effect). `params.tone_peak_nits`
-/// says whether there is one; `tone` must then be the map for that peak.
+/// The grade on a working image (the CPU reference, `FxOp::SceneGrade`): the lens falloff gain by
+/// the pixel's place, then [`grade_pixel`]. Off, the falloff leaves the colour untouched.
+pub fn grade_image(img: &mut crate::Image, p: &SceneParams) {
+    let tone = p.tone_peak_nits.map(|peak| filmcraft_color::shared_tone_map(f64::from(peak)));
+    let (w, h) = (img.w as f32, img.h as f32);
+    let falloff = p.falloff.active().then_some(p.falloff);
+    img.map_rgb(|c, x, y| {
+        let c = match falloff {
+            Some(f) => {
+                let g = f.gain(x as f32, y as f32, w, h);
+                c.map(|v| v * g)
+            }
+            None => c,
+        };
+        grade_pixel(c, p, tone.as_deref())
+    });
+}
+
+/// One pixel of the grade (straight, scene-linear working colour in, the graded colour out), from the
+/// white balance on: the lens falloff, which depends on the pixel's place, is already in `c`
+/// ([`grade_image`]). `tone` is the tone map, when the clip's input transform left it to the effect;
+/// `params.tone_peak_nits` says whether there is one, and `tone` must then be the map for that peak.
 #[inline]
 pub fn grade_pixel(c: [f32; 3], p: &SceneParams, tone: Option<&ToneMap>) -> [f32; 3] {
     let m = &p.matrix;

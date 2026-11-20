@@ -12,6 +12,8 @@ struct U {
     p3: vec4<f32>,
     p4: vec4<f32>,
     p5: vec4<f32>,
+    p6: vec4<f32>,
+    p7: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: U;
@@ -426,6 +428,22 @@ fn eetf(nits: f32, s: f32, d: f32) -> f32 {
     return pq1(e2 * smax) * 10000.0;
 }
 
+// Lens falloff correction (`Falloff::gain`): 2^(stops · r^power) at the centre of pixel `p`, r from
+// the optical centre over half the diagonal; stops p5.w, power p6.x, centre offset p6.yz.
+fn scene_grade_gain(p: vec2<i32>) -> f32 {
+    let w = f32(u.i0.y);
+    let h = f32(u.i0.z);
+    let dx = f32(p.x) + 0.5 - (0.5 + u.p6.y) * w;
+    let dy = f32(p.y) + 0.5 - (0.5 + u.p6.z) * h;
+    let half_diagonal = max(0.5 * sqrt(w * w + h * h), 1e-6);
+    let r = sqrt(dx * dx + dy * dy) / half_diagonal;
+    var shape = 0.0;
+    if r > 0.0 {
+        shape = powf(r, u.p6.x);
+    }
+    return exp2(clamp(u.p5.w * shape, -40.0, 40.0));
+}
+
 fn scene_grade_op(c0: vec3<f32>) -> vec3<f32> {
     // white balance, exposure and gains: one 3x3 (p0..p2.x, row-major)
     var c = vec3(
@@ -517,9 +535,6 @@ fn color_op(op: u32, c: vec3<f32>) -> vec3<f32> {
                 o = o + (l - l2);
             }
             return dec(o);
-        }
-        case OP_SCENE_GRADE: {
-            return scene_grade_op(c);
         }
         case OP_THREE_WAY: {
             if u.i1.x != 0u {
@@ -910,6 +925,19 @@ fn pixel(op: u32, p: vec2<i32>) -> vec4<f32> {
             }
             let res = vec3(enc_to_linear_limiter(out_enc.x), enc_to_linear_limiter(out_enc.y), enc_to_linear_limiter(out_enc.z));
             return vec4(res * a, a);
+        }
+        case OP_SCENE_GRADE: {
+            let o = ld(p);
+            let a = o.a;
+            if a <= 1e-6 {
+                return o;
+            }
+            var c = o.rgb / a;
+            // i1.z: the lens falloff is on (off, the colour is not touched)
+            if u.i1.z != 0u {
+                c = c * scene_grade_gain(p);
+            }
+            return vec4(scene_grade_op(c) * a, a);
         }
         case OP_LUMETRI: {
             let o = ld(p);

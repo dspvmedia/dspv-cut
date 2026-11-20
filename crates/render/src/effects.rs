@@ -754,11 +754,11 @@ fn lumetri(img: &mut Image, e: &EffectInstance, cx: &FxCtx) {
     }
 }
 
-/// Scene Grade, the CPU reference ([`crate::scene_grade`], `FxOp::SceneGrade`): per pixel on
-/// straight scene-linear colour, ending in the tone map the clip's input transform left out.
+/// Scene Grade, the CPU reference ([`crate::scene_grade::grade_image`], `FxOp::SceneGrade`): per
+/// pixel on straight scene-linear colour, from the lens falloff to the tone map the clip's input
+/// transform left out.
 pub(crate) fn scene_grade(img: &mut Image, p: &crate::scene_grade::SceneParams) {
-    let tone = p.tone_peak_nits.map(|peak| filmcraft_color::shared_tone_map(f64::from(peak)));
-    img.map_rgb(|c, _, _| crate::scene_grade::grade_pixel(c, p, tone.as_deref()));
+    crate::scene_grade::grade_image(img, p);
 }
 
 // ---------- blur kernels ----------

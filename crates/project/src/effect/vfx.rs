@@ -51,6 +51,13 @@ fn scene_grade_params() -> Vec<ParamDef> {
         grp(fs("kelvin", "Kelvin", 6500.0, (1667.0, 25_000.0), (2000.0, 12_000.0), "K", 0), "Input"),
         grp(fs("tint", "Tint", 0.0, (-100.0, 100.0), (-100.0, 100.0), "", 1), "Input"),
         grp(fs("exposure", "Exposure", 0.0, (-10.0, 10.0), (-4.0, 4.0), "stops", 2), "Input"),
+        // lens falloff (vignetting) correction: a radial gain in scene light, fixed to the frame. The
+        // amount is stops at the corner (0 = off); the radius runs from the centre, offset in % of the
+        // frame's width and height, over half the frame's diagonal
+        grp(fs("falloff_amount", "Falloff Amount", 0.0, (-6.0, 6.0), (0.0, 2.0), "stops", 2), "Lens"),
+        grp(fs("falloff_power", "Falloff Power", 2.0, (0.5, 8.0), (1.0, 4.0), "", 2), "Lens"),
+        grp(fs("falloff_center_x", "Falloff Center X", 0.0, (-50.0, 50.0), (-10.0, 10.0), "%", 1), "Lens"),
+        grp(fs("falloff_center_y", "Falloff Center Y", 0.0, (-50.0, 50.0), (-10.0, 10.0), "%", 1), "Lens"),
         grp(fs("gain_r", "Red Gain", 1.0, (0.0, 16.0), (0.0, 4.0), "", 3), "Primaries"),
         grp(fs("gain_g", "Green Gain", 1.0, (0.0, 16.0), (0.0, 4.0), "", 3), "Primaries"),
         grp(fs("gain_b", "Blue Gain", 1.0, (0.0, 16.0), (0.0, 4.0), "", 3), "Primaries"),
