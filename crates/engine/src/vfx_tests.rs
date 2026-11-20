@@ -172,6 +172,47 @@ fn scene_grade_is_appended_and_a_clip_has_one() {
     assert_eq!(s.project.to_json(), before);
 }
 
+/// A Scene Grade saved before the Lens parameters existed: its falloff is off, and setting the
+/// amount turns it on with the default power and centre.
+#[test]
+fn an_old_scene_grade_takes_the_lens_falloff() {
+    let mut s = demo();
+    let clip = first_v1_clip(&s);
+    s.execute("effects.apply", json!({"clips": [clip], "effect": "scene_grade"})).unwrap();
+    let lens = ["falloff_amount", "falloff_power", "falloff_center_x", "falloff_center_y"];
+    s.edit_sequence("strip", |q, _, _| {
+        let (_, it) = q.find_item_mut(filmcraft_project::ClipId(clip)).unwrap();
+        let e = it.effects.iter_mut().find(|e| e.effect == "scene_grade").unwrap();
+        for id in lens {
+            e.params.remove(id).unwrap();
+        }
+        Ok(())
+    })
+    .unwrap();
+    let falloff = |s: &Session| {
+        let (_, it) = s.active_sequence().unwrap().find_item(filmcraft_project::ClipId(clip)).unwrap();
+        let e = it.effects.iter().find(|e| e.effect == "scene_grade").unwrap().clone();
+        let cx = filmcraft_render::effects::FxCtx {
+            t: filmcraft_time::Tick::ZERO,
+            px_scale: 1.0,
+            seconds: 0.0,
+            timecode: "",
+            clip_name: "",
+            project: None,
+            env: None,
+            frame_rate: 24.0,
+            working: filmcraft_color::WorkingSpace::Rec709,
+            scene_peak_nits: None,
+        };
+        filmcraft_render::scene_grade::eval(&e, &cx).falloff
+    };
+    assert!(!falloff(&s).active());
+    s.execute("effects.setParam", json!({"clip": clip, "effect": "scene_grade", "param": "falloff_amount", "value": 1.25})).unwrap();
+    assert_eq!(falloff(&s), filmcraft_render::scene_grade::Falloff { stops: 1.25, power: 2.0, center: [0.0, 0.0] });
+    s.execute("effects.setParam", json!({"clip": clip, "effect": "scene_grade", "param": "falloff_center_x", "value": 5.0})).unwrap();
+    assert_eq!(falloff(&s).center, [0.05, 0.0]);
+}
+
 #[test]
 fn the_scene_grade_preset_goes_on_the_clips_scene_grade() {
     let mut s = demo();

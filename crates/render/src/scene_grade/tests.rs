@@ -332,6 +332,183 @@ fn hostile_parameters_give_a_finite_grade() {
         assert!(p.is_finite(), "{bad}: {p:?}");
         let out = grade_pixel([0.2, 0.4, 0.1], &p, None);
         assert!(out.iter().all(|v| v.is_finite()), "{bad}: {out:?}");
+        // the lens falloff too, at every place in the frame
+        let mut img = test_image(9, 5);
+        grade_image(&mut img, &p);
+        assert!(img.px.iter().all(|v| v.is_finite()), "{bad}: {:?}", p.falloff);
+    }
+}
+
+// ---- lens falloff
+
+/// A small picture of varied colours, scene-linear and premultiplied, with a half-transparent row.
+fn test_image(w: usize, h: usize) -> Image {
+    let mut r = Rng(7);
+    let mut px = Vec::with_capacity(w * h * 4);
+    for y in 0..h {
+        for _ in 0..w {
+            let a = if y == 1 { 0.5 } else { 1.0 };
+            let v = 4.0f64.powf(r.range(-6.0, 1.5));
+            px.extend([r.range(0.2, 1.0) * v * a, r.range(0.2, 1.0) * v * a, r.range(0.2, 1.0) * v * a, a].map(|c| c as f32));
+        }
+    }
+    Image { w, h, px }
+}
+
+/// The falloff by its definition, in f64: `2^(stops · r^power)`, r from the centre of the pixel to the
+/// optical centre (offset in fractions of the frame) over half the frame's diagonal.
+fn reference_gain(stops: f64, power: f64, center: [f64; 2], (x, y): (usize, usize), (w, h): (usize, usize)) -> f64 {
+    let (w, h) = (w as f64, h as f64);
+    let dx = x as f64 + 0.5 - (0.5 + center[0]) * w;
+    let dy = y as f64 + 0.5 - (0.5 + center[1]) * h;
+    let r = dx.hypot(dy) / (0.5 * w.hypot(h));
+    (stops * r.powf(power)).exp2()
+}
+
+/// Falloff Amount 0 is off whatever the other Lens settings: the picture is bit for bit the one of
+/// the same grade without the Lens parameters (an instance saved before they existed).
+#[test]
+fn falloff_amount_zero_is_bit_identical() {
+    let look = [("contrast", 1.45), ("shadow_exposure", 1.5), ("kelvin", 3100.0), ("white", 0.92), ("desat", 0.5)];
+    let mut with = look.to_vec();
+    with.extend([("falloff_amount", 0.0), ("falloff_power", 5.0), ("falloff_center_x", 20.0), ("falloff_center_y", -30.0)]);
+    let mut without = grade(&look);
+    for id in ["falloff_amount", "falloff_power", "falloff_center_x", "falloff_center_y"] {
+        assert!(without.params.remove(id).is_some(), "{id}");
+    }
+    for peak in [None, Some(3000.0)] {
+        let (a, b) = (eval(&grade(&with), &neutral_cx(peak)), eval(&without, &neutral_cx(peak)));
+        assert!(!a.falloff.active() && b.falloff == Falloff::OFF, "{:?} {:?}", a.falloff, b.falloff);
+        let (mut ia, mut ib) = (test_image(31, 17), test_image(31, 17));
+        grade_image(&mut ia, &a);
+        grade_image(&mut ib, &b);
+        assert!(ia.px.iter().zip(&ib.px).all(|(x, y)| x.to_bits() == y.to_bits()), "{peak:?}");
+    }
+    // and a neutral grade leaves the picture exactly as it was
+    let mut img = test_image(31, 17);
+    let before = img.px.clone();
+    grade_image(&mut img, &eval(&grade(&[]), &neutral_cx(None)));
+    assert!(img.px.iter().zip(&before).all(|(x, y)| x.to_bits() == y.to_bits()));
+}
+
+/// An instance saved before the Lens parameters existed reads Power 2 (the definition's default)
+/// once only Falloff Amount is set on it.
+#[test]
+fn an_old_instance_takes_falloff_amount_with_the_default_power() {
+    let mut e = grade(&[]);
+    for id in ["falloff_amount", "falloff_power", "falloff_center_x", "falloff_center_y"] {
+        e.params.remove(id);
+    }
+    let mut amount = find_effect(ID).expect("effect").instance().params.remove("falloff_amount").expect("falloff_amount");
+    amount.value = ParamValue::Float(1.0);
+    e.params.insert("falloff_amount".into(), amount);
+    let p = eval(&e, &neutral_cx(None));
+    assert_eq!(p.falloff, Falloff { stops: 1.0, power: 2.0, center: [0.0, 0.0] });
+}
+
+/// The gain matches its definition: 1 at the optical centre, 2^stops at the corners of a centred
+/// falloff (within half a pixel of radius), and 1 again under a moved centre.
+#[test]
+fn the_falloff_gain_follows_its_definition() {
+    let (w, h) = (1921usize, 1081usize);
+    let f = Falloff { stops: 1.5, power: 2.0, center: [0.0, 0.0] };
+    let g = |f: &Falloff, x: usize, y: usize| f.gain(x as f32, y as f32, w as f32, h as f32);
+    assert_eq!(g(&f, w / 2, h / 2), 1.0, "the centre pixel");
+    for (x, y) in [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)] {
+        assert!((g(&f, x, y) / 1.5f32.exp2() - 1.0).abs() < 2e-3, "corner {x},{y}: {}", g(&f, x, y));
+    }
+    let moved = Falloff { center: [0.25, -0.1], power: 2.7, stops: -1.2 };
+    // (0.75 w, 0.4 h) is the moved centre: 1440.75, 432.4, nearest pixel centre 1440, 432
+    assert!((g(&moved, 1440, 432) - 1.0).abs() < 1e-5, "{}", g(&moved, 1440, 432));
+    for (x, y) in [(0, 0), (77, 1000), (1900, 3), (960, 540), (1440, 1080)] {
+        let want = reference_gain(-1.2, 2.7, [0.25, -0.1], (x, y), (w, h));
+        let got = g(&moved, x, y) as f64;
+        assert!((got / want - 1.0).abs() < 1e-5, "{x},{y}: {got} vs {want}");
+    }
+}
+
+/// A flat field seen through the lens (multiplied by the inverse of the falloff) comes back flat,
+/// with and without the roll-off and under a look, for centred and moved falloffs, on frames of any
+/// shape; the correction is the same whatever the working image's resolution.
+#[test]
+fn a_flat_field_under_the_lens_comes_back_flat() {
+    let lenses = [(1.0, 2.0, [0.0, 0.0]), (2.5, 2.0, [0.0, 0.0]), (1.7, 3.5, [0.06, -0.04]), (0.8, 1.2, [-0.2, 0.15])];
+    for (w, h) in [(97usize, 61usize), (61, 97), (40, 40), (193, 121)] {
+        for (stops, power, center) in lenses {
+            for (look, peak) in [(vec![], None), (vec![("contrast", 1.45), ("shadow_exposure", 1.5), ("white", 0.92), ("desat", 0.5)], Some(3000.0))] {
+                let mut params = look.clone();
+                params.extend([
+                    ("falloff_amount", stops),
+                    ("falloff_power", power),
+                    ("falloff_center_x", center[0] * 100.0),
+                    ("falloff_center_y", center[1] * 100.0),
+                ]);
+                let p = eval(&grade(&params), &neutral_cx(peak));
+                let flat = [0.18f64, 0.15, 0.11];
+                let mut px = Vec::with_capacity(w * h * 4);
+                for y in 0..h {
+                    for x in 0..w {
+                        let k = 1.0 / reference_gain(stops, power, center, (x, y), (w, h));
+                        px.extend([flat[0] * k, flat[1] * k, flat[2] * k, 1.0].map(|c| c as f32));
+                    }
+                }
+                let mut img = Image { w, h, px };
+                grade_image(&mut img, &p);
+                let first = [img.px[0], img.px[1], img.px[2]];
+                let worst = img.px.chunks(4).flat_map(|q| (0..3).map(move |c| (q[c] / first[c] - 1.0).abs())).fold(0.0f32, f32::max);
+                assert!(worst < 2e-5, "{w}x{h} {stops} {power} {center:?} {peak:?}: not flat by {worst:.2e}");
+            }
+        }
+    }
+}
+
+/// The correction keeps hue (a pixel's R:G:B is unchanged, it is one gain per pixel), grows
+/// monotonically from the centre to the corner for a positive amount and falls for a negative one,
+/// and a brighter input stays brighter at every place.
+#[test]
+fn the_falloff_is_monotone_and_keeps_hue() {
+    let (w, h) = (161usize, 91usize);
+    for stops in [2.0f64, -2.0] {
+        let p = eval(&grade(&[("falloff_amount", stops), ("falloff_power", 2.0)]), &neutral_cx(None));
+        let src = test_image(w, h);
+        let mut img = src.clone();
+        grade_image(&mut img, &p);
+        for (a, b) in src.px.chunks(4).zip(img.px.chunks(4)) {
+            let k = [b[0] / a[0], b[1] / a[1], b[2] / a[2]];
+            assert!((k[1] / k[0] - 1.0).abs() < 1e-5 && (k[2] / k[0] - 1.0).abs() < 1e-5, "hue moved: {a:?} → {b:?}");
+        }
+        // along the diagonal from the centre to the top-left corner
+        let mut last = p.falloff.gain((w / 2) as f32, (h / 2) as f32, w as f32, h as f32);
+        for i in 1..=80 {
+            let (x, y) = ((w / 2) as f32 * (1.0 - i as f32 / 80.0), (h / 2) as f32 * (1.0 - i as f32 / 80.0));
+            let g = p.falloff.gain(x.floor(), y.floor(), w as f32, h as f32);
+            assert!(if stops > 0.0 { g >= last } else { g <= last }, "{stops}: step {i}: {last} then {g}");
+            last = g;
+        }
+        assert!(if stops > 0.0 { last > 3.5 } else { last < 0.3 }, "{stops}: corner gain {last}");
+        // brighter in, brighter out, at the corner
+        let at = |v: f32| {
+            let mut one = Image { w, h, px: [v, v, v, 1.0].repeat(w * h) };
+            grade_image(&mut one, &p);
+            one.px[0]
+        };
+        let ramp: Vec<f32> = (0..40).map(|i| at(1e-4 * 1.4f32.powi(i))).collect();
+        assert!(ramp.windows(2).all(|q| q[1] > q[0]), "{stops}: {ramp:?}");
+    }
+}
+
+/// Turning a frame a quarter turn turns a centred falloff with it: the radius is measured on the
+/// upright picture the effect sees, over the half-diagonal, which a quarter turn keeps.
+#[test]
+fn a_centred_falloff_turns_with_the_frame() {
+    let (w, h) = (64usize, 36usize);
+    let f = Falloff { stops: 1.3, power: 2.4, center: [0.0, 0.0] };
+    for y in 0..h {
+        for x in 0..w {
+            // clockwise: (x, y) of the w×h frame lands at (h - 1 - y, x) of the h×w one
+            let (a, b) = (f.gain(x as f32, y as f32, w as f32, h as f32), f.gain((h - 1 - y) as f32, x as f32, h as f32, w as f32));
+            assert_eq!(a.to_bits(), b.to_bits(), "{x},{y}");
+        }
     }
 }
 

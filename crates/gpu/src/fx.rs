@@ -94,7 +94,8 @@ struct Step {
     run: bool,
     code: u32,
     i1: [u32; 4],
-    p: [f32; 24],
+    /// Float parameters, `p0`..`p7` of the shader's uniform block.
+    p: [f32; 32],
     /// Unsharp combine: reads the blurred image and the original.
     combine: bool,
     /// A blur pass of Unsharp Mask (the original stays untouched until the combine).
@@ -105,7 +106,7 @@ struct Step {
 }
 
 fn step(code: u32, i1: [u32; 4], p: &[f32]) -> Step {
-    let mut q = [0.0; 24];
+    let mut q = [0.0; 32];
     for (d, s) in q.iter_mut().zip(p) {
         *d = *s;
     }
@@ -286,8 +287,13 @@ fn steps(op: &FxOp, w: u32, h: u32) -> Vec<Step> {
                 g.white,
                 g.desat,
                 g.tone_peak_nits.unwrap_or(0.0),
+                g.falloff.stops,
+                g.falloff.power,
+                g.falloff.center[0],
+                g.falloff.center[1],
             ];
-            out.push(step(OP_SCENE_GRADE, [g.tone_peak_nits.is_some() as u32, g.luminance_stage() as u32, 0, 0], &p));
+            let i1 = [g.tone_peak_nits.is_some() as u32, g.luminance_stage() as u32, g.falloff.active() as u32, 0];
+            out.push(step(OP_SCENE_GRADE, i1, &p));
         }
         FxOp::Lumetri {
             gains,
@@ -515,7 +521,7 @@ impl FxStage {
                 (_, _, Some(k)) => k,
                 _ => dummy,
             };
-            let mut bytes = Vec::with_capacity(128);
+            let mut bytes = Vec::with_capacity(160);
             for v in [s.code, w, h, 0].iter().chain(&s.i1) {
                 bytes.extend_from_slice(&v.to_le_bytes());
             }
