@@ -1,0 +1,5 @@
+# DaVinci Resolve Speed Editor (USB 1edb:da0e): let the logged-in user open its hidraw node, so
+# FilmCraft / DSPV Cut can read its keys and wheel (crates/speed-editor). Installed by the .deb /
+# .rpm packages; for a tarball or source build copy it to /etc/udev/rules.d/ and run
+# `sudo udevadm control --reload && sudo udevadm trigger`, then replug the device.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1edb", ATTRS{idProduct}=="da0e", TAG+="uaccess"

@@ -68,6 +68,7 @@ against 793 s with our software encoder (SSIM 0.990). NVENC HEVC round trip 48.9
 | Second computer monitor full-screen playback | yes | full screen inside the app window; no separate-display output or floating windows on other screens (#466) | 40% |
 | HDR / EDR display | macOS EDR, Windows HDR | no (SDR display of HDR sequences) | 0% |
 | Control surfaces (EUCON, Mackie HUI / MCU) | yes | no | 0% |
+| Editing keyboards (DaVinci Resolve Speed Editor) | no (Resolve only) | **yes** over USB on Linux, macOS and Windows: keys, shuttle / jog / scroll wheel, LEDs ([crates/speed-editor](../crates/speed-editor/README.md)); wheel scale not yet tuned on hardware | — |
 | LTC timecode input | yes | no | 0% |
 | Tape / deck control | legacy | no | n/a |
 

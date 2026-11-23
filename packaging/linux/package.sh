@@ -64,6 +64,7 @@ install -Dm755 "$BIN/filmcraft-cli" "$STAGE/usr/bin/filmcraft-cli"
 "${CROSS_COMPILE:-}strip" "$STAGE/usr/bin/filmcraft" "$STAGE/usr/bin/filmcraft-cli" 2>/dev/null || true
 install -Dm644 "$HERE/$APP_ID.desktop" "$STAGE/usr/share/applications/$APP_ID.desktop"
 install -Dm644 "$HERE/$APP_ID.mime.xml" "$STAGE/usr/share/mime/packages/$APP_ID.xml"
+install -Dm644 "$HERE/70-blackmagic-speed-editor.rules" "$STAGE/usr/lib/udev/rules.d/70-blackmagic-speed-editor.rules"
 mkdir -p "$STAGE/usr/share/metainfo"
 sed -e "s/@VERSION@/$VERSION/g" -e "s/@DATE@/$FILMCRAFT_BUILD_DATE/g" \
   "$HERE/$APP_ID.metainfo.xml.in" >"$STAGE/usr/share/metainfo/$APP_ID.metainfo.xml"

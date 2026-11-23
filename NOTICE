@@ -19,3 +19,9 @@ Builds made with craft-fonts (CRAFT_FONTS_DIR; all official releases) also embed
 https://github.com/storytold/craft-fonts/blob/main/ATTRIBUTION.md (BIZ UDPGothic, Shippori Mincho,
 BIZ UDMincho) — OFL-1.1. Their licence texts ship with the packages as OFL-<family>.txt.
 Public-domain film and NASA frames and CC0 music shown in README screenshots (docs/images/) — public domain / CC0-1.0. See ATTRIBUTION.md.
+
+DaVinci Resolve Speed Editor protocol (crates/speed-editor/src/protocol.rs) — ported from bmd.py in
+https://github.com/smunaut/blackmagic-misc, Copyright (C) 2021 Sylvain Munaut, licensed under the
+Apache License, Version 2.0 (LICENSE-APACHE). Changes: translated from Python to Rust and
+restructured as pure functions. Blackmagic Design, DaVinci Resolve and Speed Editor are trademarks
+of Blackmagic Design Pty. Ltd.

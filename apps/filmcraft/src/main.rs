@@ -338,6 +338,15 @@ fn app_creator(launch: Launch, graphics: graphics::GraphicsStart, created: Arc<A
             app.hooks.menu_changed = Some(update);
             app.ui.show_menu_bar = false;
         }
+        // DaVinci Resolve Speed Editor over USB (crates/speed-editor). FILMCRAFT_SPEED_EDITOR=0 turns it off.
+        #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+        if std::env::var("FILMCRAFT_SPEED_EDITOR").map_or(true, |v| v != "0") {
+            let ctx = cc.egui_ctx.clone();
+            match filmcraft_speed_editor::device::spawn(move || ctx.request_repaint()) {
+                Ok(link) => app = app.with_speed_editor(link),
+                Err(e) => log::warn!("Speed Editor support unavailable: {e}"),
+            }
+        }
         if let Some(port) = control_port {
             let rx = control_server::start(port, cc.egui_ctx.clone());
             app = if control_input_only { app.with_control_input_only(rx) } else { app.with_control(rx) };

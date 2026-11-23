@@ -1,5 +1,6 @@
 #!/bin/sh
-# deb/rpm post-install and post-remove: refresh the desktop, MIME and icon caches.
+# deb/rpm post-install and post-remove: refresh the desktop, MIME and icon caches, and the udev
+# rules (Speed Editor access).
 # Every tool is optional; missing ones are skipped.
 if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database -q /usr/share/applications || true
@@ -9,5 +10,9 @@ if command -v update-mime-database >/dev/null 2>&1; then
 fi
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then
   gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+fi
+if command -v udevadm >/dev/null 2>&1; then
+  udevadm control --reload-rules >/dev/null 2>&1 || true
+  udevadm trigger --subsystem-match=hidraw >/dev/null 2>&1 || true
 fi
 exit 0

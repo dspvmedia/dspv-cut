@@ -55,6 +55,7 @@ mod rtl;
 pub mod scrub;
 mod shuttle;
 pub mod source_playback;
+pub mod speed_editor;
 pub mod state;
 pub mod theme;
 mod theme_favorites;
@@ -380,6 +381,8 @@ pub struct FilmcraftApp {
     pub workspaces: dock::WorkspacePrefs,
     /// Workspace names and the current one, as last handed to the native menu.
     menu_workspaces: (Vec<String>, String),
+    /// DaVinci Resolve Speed Editor, when the desktop app attached one (`with_speed_editor`).
+    pub speed_editor: Option<speed_editor::SpeedEditor>,
 }
 
 pub struct GpuState {
@@ -597,6 +600,7 @@ impl FilmcraftApp {
             workspace_restored: false,
             workspaces,
             menu_workspaces: Default::default(),
+            speed_editor: None,
         }
     }
 
@@ -1737,6 +1741,7 @@ impl FilmcraftApp {
         }
         self.begin_press(&ctx);
         self.handle_shortcuts(&ctx);
+        self.poll_speed_editor(&ctx);
         self.sync_native_menu();
         self.advance_playback(&ctx);
         self.advance_source_playback(&ctx);
