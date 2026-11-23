@@ -69,6 +69,7 @@ mod rtl;
 pub mod scrub;
 mod shuttle;
 pub mod source_playback;
+pub mod speed_editor;
 pub mod state;
 pub mod theme;
 mod theme_favorites;
@@ -390,6 +391,8 @@ pub struct FilmcraftApp {
     pub workspaces: dock::WorkspacePrefs,
     /// Workspace names and the current one, as last handed to the native menu.
     menu_workspaces: (Vec<String>, String),
+    /// DaVinci Resolve Speed Editor, when the desktop app attached one (`with_speed_editor`).
+    pub speed_editor: Option<speed_editor::SpeedEditor>,
 }
 
 pub struct GpuState {
