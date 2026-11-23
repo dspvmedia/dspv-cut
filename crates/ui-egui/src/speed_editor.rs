@@ -178,7 +178,7 @@ mod tests {
         poll(&mut app, &ctx, 0.0);
         assert!(app.ui.status.contains("connected"));
         let state = device.state.try_recv().expect("LED state sent on connect");
-        assert_eq!(state.jog_mode, JogMode::AbsoluteDeadZero);
+        assert_eq!(state.jog_mode, JogMode::Relative, "a new device starts in JOG");
 
         // SNAP toggles snapping, and its LED follows
         let snapping = app.session.state.snapping;
@@ -206,7 +206,7 @@ mod tests {
         send(Event::Report(Report::Keys(vec![Key::Shuttle])));
         send(Event::Report(Report::Keys(vec![])));
         poll(&mut app, &ctx, 0.4);
-        send(Event::Report(Report::Jog { mode: Some(JogMode::AbsoluteDeadZero), value: -2200 }));
+        send(Event::Report(Report::Jog { mode: Some(JogMode::AbsoluteDeadZero), value: -2600 }));
         poll(&mut app, &ctx, 0.5);
         assert!(app.playback.playing);
         assert_eq!(app.playback.speed, -2.0);

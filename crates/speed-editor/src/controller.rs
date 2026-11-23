@@ -9,9 +9,10 @@ use crate::protocol::{JogMode, Key, Report, jog_led, led};
 pub enum WheelMode {
     /// Turning away from where the mode was entered plays at a speed set by how far it was
     /// turned, either way; back to the middle stops.
-    #[default]
     Shuttle,
-    /// Each detent-sized movement steps one frame.
+    /// Each detent-sized movement steps one frame. The mode a newly attached device starts in:
+    /// the playhead moves only while the wheel does.
+    #[default]
     Jog,
     /// As jog, many frames per turn, for moving through a long timeline.
     Scroll,
@@ -68,7 +69,9 @@ impl Default for Config {
         Config {
             jog_units_per_frame: 256,
             scroll_units_per_frame: 32,
-            shuttle_thresholds: [200, 800, 1400, 2000, 2700, 3400],
+            // A wide stop zone (about a tenth of a half turn each way) and a slow first band, so
+            // a small turn creeps and the middle is easy to find again.
+            shuttle_thresholds: [450, 1100, 1800, 2500, 3200, 3800],
             shuttle_speeds: [0.25, 0.5, 1.0, 2.0, 4.0, 8.0],
             max_step: 600,
             double_press: 0.4,
@@ -350,24 +353,33 @@ mod tests {
     }
 
     #[test]
+    fn a_new_controller_starts_in_jog() {
+        let c = Controller::default();
+        assert_eq!(c.wheel(), WheelMode::Jog);
+        let state = c.device_state(Lights::default());
+        assert_eq!((state.jog_mode, state.jog_leds), (JogMode::Relative, jog_led::JOG));
+    }
+
+    #[test]
     fn shuttle_speeds_follow_the_wheel_and_stop_at_centre() {
         let mut c = Controller::default();
+        keys(&mut c, &[Key::Shuttle], 0.0);
         let jog = |c: &mut Controller, v| c.handle(&Report::Jog { mode: Some(JogMode::AbsoluteDeadZero), value: v }, 0.0);
         assert_eq!(jog(&mut c, 50), vec![]);
-        assert_eq!(jog(&mut c, 900), vec![Action::Shuttle(0.5)]);
-        assert_eq!(jog(&mut c, 1000), vec![], "same speed band: no new action");
+        assert_eq!(jog(&mut c, 400), vec![], "inside the stop zone");
+        assert_eq!(jog(&mut c, 500), vec![Action::Shuttle(0.25)]);
+        assert_eq!(jog(&mut c, 1200), vec![Action::Shuttle(0.5)]);
+        assert_eq!(jog(&mut c, 1500), vec![], "same speed band: no new action");
         assert_eq!(jog(&mut c, 4096), vec![Action::Shuttle(8.0)]);
         assert_eq!(jog(&mut c, i32::MAX), vec![]);
         assert_eq!(jog(&mut c, 0), vec![Action::Shuttle(0.0)]);
-        assert_eq!(jog(&mut c, -250), vec![Action::Shuttle(-0.25)]);
+        assert_eq!(jog(&mut c, -500), vec![Action::Shuttle(-0.25)]);
         assert_eq!(jog(&mut c, i32::MIN), vec![Action::Shuttle(-8.0)]);
     }
 
     #[test]
     fn jog_accumulates_to_whole_frames() {
         let mut c = Controller::default();
-        keys(&mut c, &[Key::Jog], 0.0);
-        assert_eq!(c.wheel(), WheelMode::Jog);
         let rel = |c: &mut Controller, v| c.handle(&Report::Jog { mode: Some(JogMode::Relative), value: v }, 0.0);
         assert_eq!(rel(&mut c, 100), vec![]);
         assert_eq!(rel(&mut c, 200), vec![Action::Step(1)]);
@@ -388,6 +400,8 @@ mod tests {
     #[test]
     fn changing_wheel_mode_stops_shuttle_and_rezeroes() {
         let mut c = Controller::default();
+        keys(&mut c, &[Key::Shuttle], 0.0);
+        keys(&mut c, &[], 0.0);
         let before = c.device_state(Lights::default());
         assert_eq!(before.jog_leds, jog_led::SHTL);
         c.handle(&Report::Jog { mode: Some(JogMode::AbsoluteDeadZero), value: 3000 }, 0.0);
@@ -403,6 +417,8 @@ mod tests {
     #[test]
     fn stop_play_hands_playback_back_and_rezeroes_the_wheel() {
         let mut c = Controller::default();
+        keys(&mut c, &[Key::Shuttle], 0.0);
+        keys(&mut c, &[], 0.0);
         c.handle(&Report::Jog { mode: Some(JogMode::AbsoluteDeadZero), value: 3000 }, 0.0);
         let epoch = c.device_state(Lights::default()).jog_epoch;
         assert_eq!(keys(&mut c, &[Key::StopPlay], 0.0), vec![Action::Invoke("playback.toggle")]);
@@ -414,6 +430,8 @@ mod tests {
     fn hostile_config_does_not_panic() {
         let config = Config { jog_units_per_frame: 0, scroll_units_per_frame: -5, shuttle_speeds: [f64::NAN; 6], max_step: 0, ..Config::default() };
         let mut c = Controller::new(config);
+        keys(&mut c, &[Key::Shuttle], f64::NAN);
+        keys(&mut c, &[], f64::NAN);
         assert_eq!(c.handle(&Report::Jog { mode: Some(JogMode::AbsoluteDeadZero), value: i32::MIN }, f64::NAN), vec![Action::Shuttle(-1.0)]);
         keys(&mut c, &[Key::Jog], f64::NAN);
         assert_eq!(c.handle(&Report::Jog { mode: Some(JogMode::Relative), value: i32::MIN }, 0.0), vec![Action::Step(-1)]);

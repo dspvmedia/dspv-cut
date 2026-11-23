@@ -52,10 +52,12 @@ VIDEO ONLY, AUDIO ONLY, LIVE O/WR.
 
 ## Wheel
 
-- **SHTL** (default): turning away from where the mode was entered plays at 0.25×, 0.5×, 1×,
-  2×, 4× or 8×, forward or backward, by how far it was turned; back to the middle stops.
-  STOP/PLAY (or stopping playback any other way) makes the current wheel position the new middle.
-- **JOG**: one frame per 256 wheel units (about 32 frames per turn).
+- **JOG** (the mode a newly attached device starts in): one frame per 256 wheel units (about
+  32 frames per turn). The playhead moves only while the wheel does.
+- **SHTL**: turning away from where the mode was entered plays at 0.25×, 0.5×, 1×, 2×, 4× or
+  8×, forward or backward, by how far it was turned; back to the middle stops. The stop zone
+  is about a tenth of a half turn each way. STOP/PLAY (or stopping playback any other way)
+  makes the current wheel position the new middle.
 - **SCRL**: one frame per 32 units (about 256 frames per turn).
 - With edit points selected (trim mode), JOG and SCRL trim them (`trim.nudge`), like the arrow keys.
 - With the Source monitor focused, the wheel drives the Source playhead.

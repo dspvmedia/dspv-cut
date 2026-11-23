@@ -210,8 +210,8 @@ pub fn parse_report(data: &[u8]) -> Option<Report> {
         4 => {
             let slots = rest.get(..MAX_HELD_KEYS * 2)?;
             let mut keys = Vec::with_capacity(MAX_HELD_KEYS);
-            for pair in slots.chunks_exact(2) {
-                let code = u16::from_le_bytes([*pair.first()?, *pair.get(1)?]);
+            for pair in slots.as_chunks::<2>().0 {
+                let code = u16::from_le_bytes(*pair);
                 if let Some(k) = Key::from_code(code)
                     && !keys.contains(&k)
                 {
