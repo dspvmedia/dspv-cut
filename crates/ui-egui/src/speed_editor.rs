@@ -49,6 +49,7 @@ impl FilmcraftApp {
             let Some(event) = se.link.try_recv() else { break };
             match event {
                 Event::Connected { name } => {
+                    log::info!("speed editor: editor attached to {name}");
                     se.controller.reset();
                     se.sent = None;
                     self.ui.status = format!("{name} connected");
@@ -69,7 +70,9 @@ impl FilmcraftApp {
                 }
                 Event::Report(report) => {
                     for action in se.controller.handle(&report, now) {
-                        if let Err(e) = self.speed_editor_action(ctx, &action) {
+                        let result = self.speed_editor_action(ctx, &action);
+                        log::info!("speed editor: {action:?} -> {result:?} (focus: {:?}, playing: {})", self.ui.focused, self.playback.playing);
+                        if let Err(e) = result {
                             self.ui.status = e;
                         }
                     }
