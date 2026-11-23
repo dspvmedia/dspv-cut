@@ -62,14 +62,22 @@ fn supervise(side: DeviceSide, wake: Arc<dyn Fn() + Send + Sync>) {
     let backend = HidBackend::default();
     let generation = Arc::new(AtomicU64::new(0));
     let mut desired: Option<DeviceState> = None;
+    // say "not found" / enumeration errors once, not every scan
+    let mut reported_missing = false;
     loop {
         let found = match block_on(find(&backend)) {
             Ok(d) => d,
             Err(e) => {
-                log::debug!("speed editor: enumeration failed: {e}");
+                if !reported_missing {
+                    log::warn!("speed editor: listing HID devices failed: {e}");
+                }
                 None
             }
         };
+        if found.is_none() && !reported_missing {
+            log::info!("speed editor: none connected (looking for USB {VENDOR_ID:04x}:{PRODUCT_ID:04x})");
+        }
+        reported_missing = found.is_none();
         let end = match found {
             None => {
                 // nothing connected: wait, keeping the latest requested state
@@ -79,6 +87,7 @@ fn supervise(side: DeviceSide, wake: Arc<dyn Fn() + Send + Sync>) {
                 }
             }
             Some(device) => {
+                log::info!("speed editor: found {:?} (usage page {:#06x}, usage {:#06x}, id {:?})", device.name, device.usage_page, device.usage_id, device.id);
                 let gen_now = generation.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
                 run_connection(&device, gen_now, &generation, &events, &state, &mut desired, &wake)
             }
@@ -86,6 +95,10 @@ fn supervise(side: DeviceSide, wake: Arc<dyn Fn() + Send + Sync>) {
         match end {
             End::EditorGone => return,
             End::Device(reason, delay) => {
+                match &reason {
+                    Some(r) => log::warn!("speed editor: {r}"),
+                    None => log::info!("speed editor: disconnected"),
+                }
                 // the old reader (if still blocked in a read) drops its reports from now on
                 generation.fetch_add(1, Ordering::SeqCst);
                 if events.send(Event::Disconnected { reason }).is_err() {
@@ -195,6 +208,7 @@ fn run_connection(
     if let Err(e) = spawn_reader(reader, generation, current.clone(), events.clone(), wake.clone(), dead_tx) {
         return End::Device(Some(format!("Could not start the Speed Editor reader: {e}")), RETRY_AFTER_ERROR);
     }
+    log::info!("speed editor: authenticated; the device asks for a new handshake every {secs} s");
     let name = if device.name.trim().is_empty() { "DaVinci Resolve Speed Editor".to_string() } else { device.name.clone() };
     if events.send(Event::Connected { name }).is_err() {
         return End::EditorGone;
