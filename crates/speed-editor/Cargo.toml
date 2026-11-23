@@ -1,0 +1,26 @@
+[package]
+name = "filmcraft-speed-editor"
+description = "DaVinci Resolve Speed Editor support: HID protocol, key/wheel mapping to editor commands, and (feature `hid`) the USB device thread"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# The USB device thread (pure-Rust HID: hidraw on Linux, IOKit on macOS, Win32 HID on Windows).
+# Off for the egui UI crate and the web build, which only use the protocol and the controller.
+hid = ["dep:async-hid", "dep:futures-lite"]
+
+[dependencies]
+log = { workspace = true }
+# MIT; pure Rust over the OS HID APIs (no C library).
+async-hid = { version = "0.5", optional = true }
+futures-lite = { version = "2", optional = true }
+
+[[example]]
+name = "probe"
+required-features = ["hid"]

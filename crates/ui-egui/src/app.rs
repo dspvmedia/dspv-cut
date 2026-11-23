@@ -127,6 +127,7 @@ impl FilmcraftApp {
             workspace_restored: false,
             workspaces,
             menu_workspaces: Default::default(),
+            speed_editor: None,
         }
     }
 
@@ -388,6 +389,7 @@ impl FilmcraftApp {
             self.begin_press(&ctx);
             self.latch_escape_cancel(&ctx);
             self.handle_shortcuts(&ctx);
+            self.poll_speed_editor(&ctx);
             self.sync_native_menu(&ctx);
             self.scrub_audio(&ctx);
         } else {

@@ -46,6 +46,10 @@ glob = "0.3"
 # graphics.rs: enumerate the real adapters in a test.
 pollster = "1"
 
+# DaVinci Resolve Speed Editor: the USB device thread (pure-Rust HID).
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
+filmcraft-speed-editor = { workspace = true, features = ["hid"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 fmv-macos-events = "=0.1.0"
 muda = "0.21"

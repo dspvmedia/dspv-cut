@@ -297,3 +297,9 @@ DSPV Media: further third-party notices (licence audit of 2026-10-22)
 
 symphonia (audio decoding) is used unmodified under the Mozilla Public License 2.0; source:
 https://github.com/pdeljanov/Symphonia
+
+DaVinci Resolve Speed Editor protocol (crates/speed-editor/src/protocol.rs) — ported from bmd.py in
+https://github.com/smunaut/blackmagic-misc, Copyright (C) 2021 Sylvain Munaut, licensed under the
+Apache License, Version 2.0 (LICENSE-APACHE). Changes: translated from Python to Rust and
+restructured as pure functions. Blackmagic Design, DaVinci Resolve and Speed Editor are trademarks
+of Blackmagic Design Pty. Ltd.

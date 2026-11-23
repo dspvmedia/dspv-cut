@@ -70,6 +70,10 @@ contents:
   - src: ${STAGE}/usr/share/
     dst: /usr/share/
     type: tree
+  # Speed Editor access for the logged-in user (uaccess)
+  - src: ${STAGE}/usr/lib/udev/rules.d/70-blackmagic-speed-editor.rules
+    dst: /usr/lib/udev/rules.d/70-blackmagic-speed-editor.rules
+    file_info: { mode: 0644 }
 
 scripts:
   postinstall: packaging/linux/postinst.sh
