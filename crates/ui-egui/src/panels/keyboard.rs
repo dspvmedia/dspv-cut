@@ -7,6 +7,7 @@
 //! |---|---|---|
 //! | `window.maximizeFrame` / `window.maximizeFrameUnderCursor` | Maximize or Restore Active Frame / Frame Under Cursor | Shift+` / ` |
 //! | `window.toggleFullScreen` | Toggle Full Screen | Ctrl+` |
+//! | `window.floatProgramMonitor` | (DSPV) Float the Program monitor in a large window of its own, or dock it back | Cmd+Alt+P |
 //! | `window.nextPanel` / `window.prevPanel` | Select Next / Previous Panel | Ctrl+Shift+. / Ctrl+Shift+, |
 //! | `window.toggleMonitorFocus` | Toggle Source/Program Monitor Focus | |
 //! | `window.openSearch` / `panel.selectFindBox` | Open Search / Select Find Box | Cmd+Shift+F / Shift+F |
@@ -29,6 +30,7 @@ use serde_json::{Value, json};
 use crate::FilmcraftApp;
 use crate::dock::PanelKind;
 use crate::menus::UiCommand;
+use craft_ui::docking::{Action, Location};
 use filmcraft_engine::project_panel::ViewMode;
 
 /// Keyboard-only view state.
@@ -41,11 +43,14 @@ pub struct KeysState {
     pub saved_heights: Option<[f32; 2]>,
     /// Icon view columns in the last frame (Move Selection Up / Down step).
     pub icon_columns: usize,
+    /// Where the Program monitor was docked before Float Program Monitor took it out, so the
+    /// same command puts it back there.
+    pub program_dock: Option<Location<PanelKind>>,
 }
 
 impl Default for KeysState {
     fn default() -> Self {
-        Self { maximized: None, saved_heights: None, icon_columns: 1 }
+        Self { maximized: None, saved_heights: None, icon_columns: 1, program_dock: None }
     }
 }
 
@@ -62,6 +67,8 @@ pub const COMMANDS: &[UiCommand] = &[
     uic!("window.maximizeFrame", "Maximize Frame", ["Window"], Some("Shift+`")),
     uic!("window.maximizeFrameUnderCursor", "Maximize or Restore Frame Under Cursor", [], Some("`")),
     uic!("window.toggleFullScreen", "Toggle Full Screen", [], Some("Ctrl+`")),
+    // DSPV: a big Program monitor to scrub against on a laptop screen, in and out with one key.
+    uic!("window.floatProgramMonitor", "Float Program Monitor", ["Window"], Some("Cmd+Alt+P")),
     uic!("window.nextPanel", "Select Next Panel", [], Some("Ctrl+Shift+.")),
     uic!("window.prevPanel", "Select Previous Panel", [], Some("Ctrl+Shift+,")),
     uic!("window.toggleMonitorFocus", "Toggle Source/Program Monitor Focus", [], None),
@@ -161,6 +168,7 @@ pub fn route(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, params: &Val
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(fs));
             Ok(json!({"fullScreen": fs}))
         }
+        "window.floatProgramMonitor" => toggle_float_program(app, app.float_bounds(ctx)),
         "window.nextPanel" | "window.prevPanel" => Ok(cycle_panel(app, id == "window.nextPanel")),
         "window.toggleMonitorFocus" => {
             let p = if app.ui.focused == PanelKind::Program { PanelKind::Source } else { PanelKind::Program };
@@ -251,6 +259,62 @@ pub(crate) fn toggle_maximize(app: &mut FilmcraftApp, p: PanelKind) -> Value {
         app.ui.focused = p;
     }
     json!({"maximized": app.ui.keys.maximized.map(|p| p.title())})
+}
+
+/// Share of the app window's free area a floated Program monitor takes on each side.
+const FLOAT_MARGIN: f32 = 0.04;
+
+/// Float Program Monitor: take the Program monitor out into a window of its own covering most
+/// of the app window (an OS window that can be moved, resized or made full screen), or, while it
+/// floats, put it back where it was docked. A monitor floated some other way docks back next to
+/// the Source monitor.
+pub(crate) fn toggle_float_program(app: &mut FilmcraftApp, bounds: egui::Rect) -> Result<Value, String> {
+    let program = PanelKind::Program;
+    if app.ui.dock.floating.iter().any(|window| window.contains(&program)) {
+        dock_program(app)?;
+        return Ok(json!({"floating": false}));
+    }
+    let docked = app.ui.dock.contains(&program);
+    let saved = if docked { app.ui.dock.location(&program).ok() } else { None };
+    let mut actions = Vec::new();
+    if !docked {
+        actions.push(Action::Open { panel: program, anchor: None });
+    }
+    actions.push(Action::Float { panel: program, rect: float_rect(bounds) });
+    app.apply_dock_all(actions)?;
+    app.ui.keys.program_dock = saved;
+    app.ui.focused = program;
+    Ok(json!({"floating": true}))
+}
+
+/// Most of `bounds`, centred: a window as large as fits without hiding the app window's edges.
+fn float_rect(bounds: egui::Rect) -> [f32; 4] {
+    let (w, h) = (bounds.width().max(320.0), bounds.height().max(180.0));
+    let (mx, my) = (w * FLOAT_MARGIN, h * FLOAT_MARGIN);
+    let finite = |v: f32| if v.is_finite() { v } else { 0.0 };
+    [finite(bounds.min.x + mx), finite(bounds.min.y + my), finite(w - 2.0 * mx).max(320.0), finite(h - 2.0 * my).max(180.0)]
+}
+
+/// Put a floating Program monitor back: where Float Program Monitor found it, else as a tab
+/// beside the Source monitor (or the Timeline, or wherever the layout opens a panel).
+fn dock_program(app: &mut FilmcraftApp) -> Result<(), String> {
+    use crate::dock::LayoutExt as _;
+    let program = PanelKind::Program;
+    let mut layout = app.ui.dock.clone();
+    layout.apply(Action::Close { panel: program }).map_err(|e| e.to_string())?;
+    // `restore` changes nothing when it fails, say when the anchor panel has since been closed.
+    let restored = app.ui.keys.program_dock.as_ref().is_some_and(|location| layout.restore(program, location).is_ok());
+    if !restored {
+        let anchor = [PanelKind::Source, PanelKind::Timeline].into_iter().find(|p| layout.is_docked(*p));
+        layout.apply(Action::Open { panel: program, anchor }).map_err(|e| e.to_string())?;
+    }
+    if !layout.is_docked(program) {
+        return Err("could not dock the Program monitor".into());
+    }
+    app.ui.dock = layout;
+    app.ui.keys.program_dock = None;
+    app.ui.focused = program;
+    Ok(())
 }
 
 /// The visible panel under the pointer (from last frame's automation rects). Each native
@@ -565,5 +629,86 @@ mod transcript_selection_tests {
         let (sa, sb) = app.ui.transcript_sel.unwrap();
         assert!(sa < 2 && sb < 2, "selection {sa}..{sb} outside the 2-word transcript");
         assert_eq!(r["word"], json!(sb));
+    }
+}
+
+#[cfg(test)]
+mod float_program_tests {
+    use crate::dock::{LayoutExt as _, PanelKind};
+    use craft_ui::docking::Action;
+    use egui::{Event, Key, Modifiers, Rect, pos2};
+
+    fn app() -> crate::FilmcraftApp {
+        crate::FilmcraftApp::new(filmcraft_engine::Session::default())
+    }
+
+    fn bounds() -> Rect {
+        Rect::from_min_max(pos2(0.0, 40.0), pos2(1512.0, 982.0))
+    }
+
+    fn floating(app: &crate::FilmcraftApp) -> bool {
+        app.ui.dock.floating.iter().any(|w| w.contains(&PanelKind::Program))
+    }
+
+    #[test]
+    fn the_program_monitor_floats_large_and_docks_back_where_it_was() {
+        let mut app = app();
+        assert!(app.ui.dock.is_docked(PanelKind::Program));
+        let before = app.ui.dock.location(&PanelKind::Program).unwrap();
+        super::toggle_float_program(&mut app, bounds()).unwrap();
+        assert!(floating(&app) && !app.ui.dock.is_docked(PanelKind::Program));
+        assert_eq!(app.ui.focused, PanelKind::Program);
+        let window = app.ui.dock.floating.iter().find(|w| w.contains(&PanelKind::Program)).unwrap();
+        let [_, _, w, h] = window.rect;
+        assert!(w >= bounds().width() * 0.9 && h >= bounds().height() * 0.9, "most of the app window: {w}x{h}");
+        super::toggle_float_program(&mut app, bounds()).unwrap();
+        assert!(!floating(&app) && app.ui.dock.is_docked(PanelKind::Program));
+        assert_eq!(app.ui.dock.location(&PanelKind::Program).unwrap(), before, "back in the same place");
+        assert!(app.ui.keys.program_dock.is_none());
+    }
+
+    #[test]
+    fn a_monitor_whose_old_place_is_gone_docks_beside_the_source_monitor() {
+        let mut app = app();
+        super::toggle_float_program(&mut app, bounds()).unwrap();
+        // floated without the command, or the anchor closed since: nothing to restore
+        app.ui.keys.program_dock = None;
+        super::toggle_float_program(&mut app, bounds()).unwrap();
+        assert!(app.ui.dock.is_docked(PanelKind::Program));
+    }
+
+    #[test]
+    fn a_closed_program_monitor_opens_floating() {
+        let mut app = app();
+        app.apply_dock(Action::Close { panel: PanelKind::Program }).unwrap();
+        super::toggle_float_program(&mut app, bounds()).unwrap();
+        assert!(floating(&app));
+        super::toggle_float_program(&mut app, bounds()).unwrap();
+        assert!(app.ui.dock.is_docked(PanelKind::Program));
+    }
+
+    #[test]
+    fn hostile_bounds_still_give_a_usable_window() {
+        for b in [Rect::NOTHING, Rect::EVERYTHING, Rect::from_min_max(pos2(f32::NAN, 0.0), pos2(10.0, f32::INFINITY))] {
+            let [x, y, w, h] = super::float_rect(b);
+            assert!([x, y, w, h].iter().all(|v| v.is_finite()) && w >= 320.0 && h >= 180.0, "{b:?} -> {:?}", [x, y, w, h]);
+        }
+    }
+
+    /// Cmd+Alt+P floats the monitor, and pressed again in the floating window (whose keys reach
+    /// the main window's bindings) docks it.
+    #[test]
+    fn cmd_alt_p_toggles_the_floating_monitor() {
+        let mut app = app();
+        app.bindings = crate::menus::bindings(&app);
+        let ctx = egui::Context::default();
+        let press = || {
+            let modifiers = Modifiers { alt: true, ..Modifiers::COMMAND };
+            vec![Event::Key { key: Key::P, physical_key: Some(Key::P), pressed: true, repeat: false, modifiers }]
+        };
+        app.handle_forwarded_keys(&ctx, press());
+        assert!(floating(&app), "Cmd+Alt+P floats the Program monitor");
+        app.handle_forwarded_keys(&ctx, press());
+        assert!(app.ui.dock.is_docked(PanelKind::Program), "pressed again it docks");
     }
 }

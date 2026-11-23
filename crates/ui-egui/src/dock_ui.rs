@@ -164,7 +164,7 @@ impl FilmcraftApp {
         }
     }
 
-    fn apply_dock_all(&mut self, actions: Vec<Action<PanelKind>>) -> Result<(), String> {
+    pub(crate) fn apply_dock_all(&mut self, actions: Vec<Action<PanelKind>>) -> Result<(), String> {
         let mut layout = self.ui.dock.clone();
         let mut relocating = false;
         let mut reveal = None;
